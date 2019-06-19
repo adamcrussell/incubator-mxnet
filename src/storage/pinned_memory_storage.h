@@ -18,7 +18,8 @@
  */
 
 /*!
- * \file cpu_device_storage.h
+ * Copyright (c) 2015 by Contributors
+ * \file pinned_memory_storage.h
  * \brief CPU storage with pinned memory
  */
 #ifndef MXNET_STORAGE_PINNED_MEMORY_STORAGE_H_
@@ -27,6 +28,7 @@
 
 #include <dmlc/logging.h>
 #include "mxnet/base.h"
+#include "mxnet/storage.h"
 #include "../common/cuda_utils.h"
 
 namespace mxnet {
@@ -36,27 +38,36 @@ class PinnedMemoryStorage {
  public:
   /*!
    * \brief Allocation.
-   * \param size Size to allocate.
-   * \return Pointer to the storage.
+   * \param handle Handle struct.
    */
-  inline static void* Alloc(size_t size);
+  inline static void Alloc(Storage::Handle* handle);
 
   /*!
    * \brief Deallocation.
-   * \param ptr Pointer to deallocate.
+   * \param handle Handle struct.
    */
-  inline static void Free(void* ptr);
+  inline static void Free(Storage::Handle handle);
 };
 
-inline void* PinnedMemoryStorage::Alloc(size_t size) {
-  void* ret = nullptr;
+inline void PinnedMemoryStorage::Alloc(Storage::Handle* handle) {
+  handle->dptr = nullptr;
+  const size_t size = handle->size;
+  if (size == 0) return;
+
+#if MXNET_USE_NCCL
+  std::lock_guard<std::mutex> lock(Storage::Get()->GetMutex(Context::kGPU));
+#endif
+  mxnet::common::cuda::DeviceStore device_store(handle->ctx.real_dev_id(), true);
   // make the memory available across all devices
-  CUDA_CALL(cudaHostAlloc(&ret, size, cudaHostAllocPortable));
-  return ret;
+  CUDA_CALL(cudaHostAlloc(&handle->dptr, size, cudaHostAllocPortable));
 }
 
-inline void PinnedMemoryStorage::Free(void* ptr) {
-  cudaError_t err = cudaFreeHost(ptr);
+inline void PinnedMemoryStorage::Free(Storage::Handle handle) {
+#if MXNET_USE_NCCL
+  std::lock_guard<std::mutex> lock(Storage::Get()->GetMutex(Context::kGPU));
+#endif
+  mxnet::common::cuda::DeviceStore device_store(handle.ctx.real_dev_id(), true);
+  cudaError_t err = cudaFreeHost(handle.dptr);
   // ignore unloading error, as memory has already been recycled
   if (err != cudaSuccess && err != cudaErrorCudartUnloading) {
     LOG(FATAL) << "CUDA: " << cudaGetErrorString(err);

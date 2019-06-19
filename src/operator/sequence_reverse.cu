@@ -18,6 +18,7 @@
  */
 
 /*!
+ * Copyright (c) 2015 by Contributors
  * \file sequence_reverse.cu
  * \brief
  * \author Sebastian Bodenstein
@@ -27,11 +28,13 @@
 
 namespace mxnet {
 namespace op {
-template <> Operator *CreateOp<gpu>(SequenceReverseParam param, int dtype) {
-  Operator *op = NULL;
-  MSHADOW_REAL_TYPE_SWITCH(dtype, DType, {
-    op = new SequenceReverseOp<gpu, DType>(param);
-  })
+template <> Operator *CreateOp<gpu>(SequenceReverseParam param, int dtype, int itype) {
+  Operator *op = nullptr;
+  MSHADOW_TYPE_SWITCH(dtype, DType, {
+      MSHADOW_TYPE_SWITCH(itype, IType, {
+          op = new SequenceReverseOp<gpu, DType, IType>(param);
+        });
+    });
   return op;
 }
 

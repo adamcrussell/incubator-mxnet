@@ -1,3 +1,20 @@
+<!--- Licensed to the Apache Software Foundation (ASF) under one -->
+<!--- or more contributor license agreements.  See the NOTICE file -->
+<!--- distributed with this work for additional information -->
+<!--- regarding copyright ownership.  The ASF licenses this file -->
+<!--- to you under the Apache License, Version 2.0 (the -->
+<!--- "License"); you may not use this file except in compliance -->
+<!--- with the License.  You may obtain a copy of the License at -->
+
+<!---   http://www.apache.org/licenses/LICENSE-2.0 -->
+
+<!--- Unless required by applicable law or agreed to in writing, -->
+<!--- software distributed under the License is distributed on an -->
+<!--- "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY -->
+<!--- KIND, either express or implied.  See the License for the -->
+<!--- specific language governing permissions and limitations -->
+<!--- under the License. -->
+
 # Gluon - Neural network building blocks
 
 Gluon package is a high-level interface for MXNet designed to be easy to use while
@@ -70,7 +87,7 @@ A network must be created and initialized before it can be used:
 net = Net()
 # Initialize on CPU. Replace with `mx.gpu(0)`, or `[mx.gpu(0), mx.gpu(1)]`,
 # etc to use one or more GPUs.
-net.collect_params().initialize(mx.init.Xavier(), ctx=mx.cpu())
+net.initialize(mx.init.Xavier(), ctx=mx.cpu())
 ```
 
 Note that because we didn't specify input size to layers in Net's constructor,
@@ -102,7 +119,8 @@ To compute loss and backprop for one iteration, we do:
 label = mx.nd.arange(10)  # dummy label
 with autograd.record():
     output = net(data)
-    loss = gluon.loss.softmax_cross_entropy_loss(output, label)
+    L = gluon.loss.SoftmaxCrossEntropyLoss()
+    loss = L(output, label)
     loss.backward()
 print('loss:', loss)
 print('grad:', net.fc1.weight.grad())
@@ -127,9 +145,10 @@ this is a commonly used functionality, gluon provide a `Trainer` class for it:
 ```python
 trainer = gluon.Trainer(net.collect_params(), 'sgd', {'learning_rate': 0.01})
 
-with record():
+with autograd.record():
     output = net(data)
-    loss = gluon.loss.softmax_cross_entropy_loss(output, label)
+    L = gluon.loss.SoftmaxCrossEntropyLoss()
+    loss = L(output, label)
     loss.backward()
 
 # do the update. Trainer needs to know the batch size of data to normalize

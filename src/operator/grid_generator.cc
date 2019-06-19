@@ -18,6 +18,7 @@
  */
 
 /*!
+ * Copyright (c) 2017 by Contributors
  * \file grid_generator.cc
  * \brief
  * \author Xu Dong
@@ -29,7 +30,7 @@ namespace mxnet {
 namespace op {
 template<>
 Operator* CreateOp<cpu>(GridGeneratorParam param, int dtype) {
-  Operator *op = NULL;
+  Operator *op = nullptr;
   if (dtype == mshadow::kFloat32) {
     op = new GridGeneratorOp<cpu, float>(param);
   } else {
@@ -38,7 +39,7 @@ Operator* CreateOp<cpu>(GridGeneratorParam param, int dtype) {
   return op;
 }
 
-Operator *GridGeneratorProp::CreateOperatorEx(Context ctx, std::vector<TShape> *in_shape,
+Operator *GridGeneratorProp::CreateOperatorEx(Context ctx, mxnet::ShapeVector *in_shape,
                                      std::vector<int> *in_type) const {
   DO_BIND_DISPATCH(CreateOp, param_, (*in_type)[0]);
 }

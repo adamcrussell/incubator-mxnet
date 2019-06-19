@@ -20,15 +20,16 @@
 
 import os
 import mxnet as mx
+from mxnet import gluon
 
-def load_mldata_iter(filename, batch_size):
+def load_mldataset(filename):
     """Not particularly fast code to parse the text file and load it into three NDArray's
     and product an NDArrayIter
     """
     user = []
     item = []
     score = []
-    with file(filename) as f:
+    with open(filename) as f:
         for line in f:
             tks = line.strip().split('\t')
             if len(tks) != 4:
@@ -39,27 +40,30 @@ def load_mldata_iter(filename, batch_size):
     user = mx.nd.array(user)
     item = mx.nd.array(item)
     score = mx.nd.array(score)
-    return mx.io.NDArrayIter(data={'user':user,'item':item},label={'score':score},
-                             batch_size=batch_size, shuffle=True)
+    return gluon.data.ArrayDataset(user, item, score)
 
 def ensure_local_data(prefix):
     if not os.path.exists("%s.zip" % prefix):
         print("Downloading MovieLens data: %s" % prefix)
+        # MovieLens 100k dataset from https://grouplens.org/datasets/movielens/
+        # This dataset is copy right to GroupLens Research Group at the University of Minnesota,
+        # and licensed under their usage license.
+        # For full text of the usage license, see http://files.grouplens.org/datasets/movielens/ml-100k-README.txt
         os.system("wget http://files.grouplens.org/datasets/movielens/%s.zip" % prefix)
         os.system("unzip %s.zip" % prefix)
 
 
-def get_data_iter(batch_size, prefix='ml-100k'):
+def get_dataset(prefix='ml-100k'):
     """Returns a pair of NDArrayDataIter, one for train, one for test.
     """
     ensure_local_data(prefix)
-    return (load_mldata_iter('./%s/u1.base' % prefix, batch_size),
-            load_mldata_iter('./%s/u1.test' % prefix, batch_size))
+    return (load_mldataset('./%s/u1.base' % prefix),
+            load_mldataset('./%s/u1.test' % prefix))
 
 def max_id(fname):
     mu = 0
     mi = 0
-    for line in file(fname):
+    for line in open(fname):
         tks = line.strip().split('\t')
         if len(tks) != 4:
             continue

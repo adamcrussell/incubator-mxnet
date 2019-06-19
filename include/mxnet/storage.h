@@ -18,6 +18,7 @@
  */
 
 /*!
+ * Copyright (c) 2015 by Contributors
  * \file storage.h
  * \brief Storage manager across multiple devices.
  */
@@ -41,15 +42,20 @@ class Storage {
     /*!
      * \brief Pointer to the data.
      */
-    void* dptr;
+    void* dptr{nullptr};
     /*!
      * \brief Size of the storage.
      */
-    size_t size;
+    size_t size{0};
     /*!
      * \brief Context information about device and ID.
      */
     Context ctx;
+    /*!
+     * \brief Id for IPC shared memory
+     */
+    int shared_pid{-1};
+    int shared_id{-1};
   };
   /*!
    * \brief Allocate a new contiguous memory for a given size.
@@ -57,10 +63,26 @@ class Storage {
    * \param ctx Context information about the device and ID.
    * \return Handle struct.
    */
-  virtual Handle Alloc(size_t size, Context ctx) = 0;
+  Handle Alloc(size_t size, Context ctx) {
+    Handle hd;
+    hd.size = size;
+    hd.ctx = ctx;
+    this->Alloc(&hd);
+    return hd;
+  }
+  /*!
+   * \brief Allocate a new contiguous memory for a given size.
+   * \param handle handle initialized with size and ctx
+   */
+  virtual void Alloc(Handle* handle) = 0;
+  /*!
+   * \brief Increase ref counter on shared memory.
+   * \param handle handle to shared memory.
+   */
+  virtual void SharedIncrementRefCount(Handle handle) = 0;
   /*!
    * \brief Free storage.
-   * \param handle Handle struect.
+   * \param handle Handle struct.
    */
   virtual void Free(Handle handle) = 0;
   /*!
@@ -74,9 +96,27 @@ class Storage {
    */
   virtual void DirectFree(Handle handle) = 0;
   /*!
+  * \brief Release all memory from device if using a pooled storage manager
+  *
+  * This release all memory from pool storage managers such as
+  * GPUPooledStorageManager and GPUPooledRoundedStorageManager.
+  * For non-pool memory managers this has no effect.
+  */
+  virtual void ReleaseAll(Context ctx) = 0;
+  /*!
    * \brief Destructor.
    */
   virtual ~Storage() {}
+  /*!
+   * \brief Returns mutex used by storage manager
+   */
+  std::mutex& GetMutex(Context::DeviceType dev) {
+    if (dev == Context::kCPU) {
+      return cpu_mutex_;
+    } else {
+      return gpu_mutex_;
+    }
+  }
   /*!
    * \return Storage singleton.
    */
@@ -90,6 +130,10 @@ class Storage {
    * \return A shared pointer to Storage singleton.
    */
   static std::shared_ptr<Storage> _GetSharedRef();
+
+ private:
+  std::mutex cpu_mutex_;
+  std::mutex gpu_mutex_;
 };  // class Storage
 }  // namespace mxnet
 #endif  // MXNET_STORAGE_H_

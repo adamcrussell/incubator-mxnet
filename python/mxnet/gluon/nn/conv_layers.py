@@ -18,10 +18,18 @@
 # coding: utf-8
 # pylint: disable= arguments-differ, too-many-lines
 """Convolutional neural network layers."""
+__all__ = ['Conv1D', 'Conv2D', 'Conv3D',
+           'Conv1DTranspose', 'Conv2DTranspose', 'Conv3DTranspose',
+           'MaxPool1D', 'MaxPool2D', 'MaxPool3D',
+           'AvgPool1D', 'AvgPool2D', 'AvgPool3D',
+           'GlobalMaxPool1D', 'GlobalMaxPool2D', 'GlobalMaxPool3D',
+           'GlobalAvgPool1D', 'GlobalAvgPool2D', 'GlobalAvgPool3D',
+           'ReflectionPad2D']
+
 from ..block import HybridBlock
 from ... import symbol
 from ...base import numeric_types
-from .basic_layers import Activation
+from .activations import Activation
 
 
 def _infer_weight_shape(op_name, data_shape, kwargs):
@@ -145,16 +153,17 @@ class _Conv(HybridBlock):
             s += ', groups={num_group}'
         if self.bias is None:
             s += ', bias=False'
+        if self.act:
+            s += ', {}'.format(self.act)
         s += ')'
+        shape = self.weight.shape
         return s.format(name=self.__class__.__name__,
-                        mapping=self._channels if not self._in_channels
-                        else '{0} -> {1}'.format(self._in_channels,
-                                                 self._channels),
+                        mapping='{0} -> {1}'.format(shape[1] if shape[1] else None, shape[0]),
                         **self._kwargs)
 
 
 class Conv1D(_Conv):
-    """1D convolution layer (e.g. temporal convolution).
+    r"""1D convolution layer (e.g. temporal convolution).
 
     This layer creates a convolution kernel that is convolved
     with the layer input over a single spatial (or temporal) dimension
@@ -189,7 +198,7 @@ class Conv1D(_Conv):
         layers side by side, each seeing half the input channels, and producing
         half the output channels, and both subsequently concatenated.
     layout: str, default 'NCW'
-        Dimension ordering of data and weight. Can be 'NCW', 'NWC', etc.
+        Dimension ordering of data and weight. Only supports 'NCW' layout for now.
         'N', 'C', 'W' stands for batch, channel, and width (time) dimensions
         respectively. Convolution is applied on the 'W' dimension.
     in_channels : int, default 0
@@ -208,21 +217,21 @@ class Conv1D(_Conv):
         Initializer for the bias vector.
 
 
-    Input shape:
-        This depends on the `layout` parameter. Input is 3D array of shape
-        (batch_size, in_channels, width) if `layout` is `NCW`.
+    Inputs:
+        - **data**: 3D input tensor with shape `(batch_size, in_channels, width)`
+          when `layout` is `NCW`. For other layouts shape is permuted accordingly.
 
-    Output shape:
-        This depends on the `layout` parameter. Output is 3D array of shape
-        (batch_size, channels, out_width) if `layout` is `NCW`.
-        out_width is calculated as::
+    Outputs:
+        - **out**: 3D output tensor with shape `(batch_size, channels, out_width)`
+          when `layout` is `NCW`. out_width is calculated as::
 
-            out_width = floor((width+2*padding-dilation*(kernel_size-1)-1)/stride)+1
+              out_width = floor((width+2*padding-dilation*(kernel_size-1)-1)/stride)+1
     """
     def __init__(self, channels, kernel_size, strides=1, padding=0, dilation=1,
                  groups=1, layout='NCW', activation=None, use_bias=True,
                  weight_initializer=None, bias_initializer='zeros',
                  in_channels=0, **kwargs):
+        assert layout == 'NCW', "Only supports 'NCW' layout for now"
         if isinstance(kernel_size, numeric_types):
             kernel_size = (kernel_size,)
         assert len(kernel_size) == 1, "kernel_size must be a number or a list of 1 ints"
@@ -232,7 +241,7 @@ class Conv1D(_Conv):
 
 
 class Conv2D(_Conv):
-    """2D convolution layer (e.g. spatial convolution over images).
+    r"""2D convolution layer (e.g. spatial convolution over images).
 
     This layer creates a convolution kernel that is convolved
     with the layer input to produce a tensor of
@@ -265,9 +274,9 @@ class Conv2D(_Conv):
         layers side by side, each seeing half the input channels, and producing
         half the output channels, and both subsequently concatenated.
     layout : str, default 'NCHW'
-        Dimension ordering of data and weight. Can be 'NCHW', 'NHWC', etc.
-        'N', 'C', 'H', 'W' stands for batch, channel, height, and width
-        dimensions respectively. Convolution is applied on the 'H' and
+        Dimension ordering of data and weight. Only supports 'NCHW' and 'NHWC'
+        layout for now. 'N', 'C', 'H', 'W' stands for batch, channel, height,
+        and width dimensions respectively. Convolution is applied on the 'H' and
         'W' dimensions.
     in_channels : int, default 0
         The number of input channels to this layer. If not specified,
@@ -285,23 +294,24 @@ class Conv2D(_Conv):
         Initializer for the bias vector.
 
 
-    Input shape:
-        This depends on the `layout` parameter. Input is 4D array of shape
-        (batch_size, in_channels, height, width) if `layout` is `NCHW`.
+    Inputs:
+        - **data**: 4D input tensor with shape
+          `(batch_size, in_channels, height, width)` when `layout` is `NCHW`.
+          For other layouts shape is permuted accordingly.
 
-    Output shape:
-        This depends on the `layout` parameter. Output is 4D array of shape
-        (batch_size, channels, out_height, out_width) if `layout` is `NCHW`.
+    Outputs:
+        - **out**: 4D output tensor with shape
+          `(batch_size, channels, out_height, out_width)` when `layout` is `NCHW`.
+          out_height and out_width are calculated as::
 
-        out_height and out_width are calculated as::
-
-            out_height = floor((height+2*padding[0]-dilation[0]*(kernel_size[0]-1)-1)/stride[0])+1
-            out_width = floor((width+2*padding[1]-dilation[1]*(kernel_size[1]-1)-1)/stride[1])+1
+              out_height = floor((height+2*padding[0]-dilation[0]*(kernel_size[0]-1)-1)/stride[0])+1
+              out_width = floor((width+2*padding[1]-dilation[1]*(kernel_size[1]-1)-1)/stride[1])+1
     """
     def __init__(self, channels, kernel_size, strides=(1, 1), padding=(0, 0),
                  dilation=(1, 1), groups=1, layout='NCHW',
                  activation=None, use_bias=True, weight_initializer=None,
                  bias_initializer='zeros', in_channels=0, **kwargs):
+        assert layout in ('NCHW', 'NHWC'), "Only supports 'NCHW' and 'NHWC' layout for now"
         if isinstance(kernel_size, numeric_types):
             kernel_size = (kernel_size,)*2
         assert len(kernel_size) == 2, "kernel_size must be a number or a list of 2 ints"
@@ -344,9 +354,9 @@ class Conv3D(_Conv):
         layers side by side, each seeing half the input channels, and producing
         half the output channels, and both subsequently concatenated.
     layout : str, default 'NCDHW'
-        Dimension ordering of data and weight. Can be 'NCDHW', 'NDHWC', etc.
-        'N', 'C', 'H', 'W', 'D' stands for batch, channel, height, width and
-        depth dimensions respectively. Convolution is applied on the 'D',
+        Dimension ordering of data and weight. Only supports 'NCDHW' and 'NDHWC'
+        layout for now. 'N', 'C', 'H', 'W', 'D' stands for batch, channel, height,
+        width and depth dimensions respectively. Convolution is applied on the 'D',
         'H' and 'W' dimensions.
     in_channels : int, default 0
         The number of input channels to this layer. If not specified,
@@ -364,25 +374,25 @@ class Conv3D(_Conv):
         Initializer for the bias vector.
 
 
-    Input shape:
-        This depends on the `layout` parameter. Input is 5D array of shape
-        (batch_size, in_channels, depth, height, width) if `layout` is `NCDHW`.
+    Inputs:
+        - **data**: 5D input tensor with shape
+          `(batch_size, in_channels, depth, height, width)` when `layout` is `NCDHW`.
+          For other layouts shape is permuted accordingly.
 
-    Output shape:
-        This depends on the `layout` parameter. Output is 5D array of shape
-        (batch_size, channels, out_depth, out_height, out_width) if `layout` is
-        `NCDHW`.
+    Outputs:
+        - **out**: 5D output tensor with shape
+          `(batch_size, channels, out_depth, out_height, out_width)` when `layout` is `NCDHW`.
+          out_depth, out_height and out_width are calculated as::
 
-        out_depth, out_height and out_width are calculated as::
-
-            out_depth = floor((depth+2*padding[0]-dilation[0]*(kernel_size[0]-1)-1)/stride[0])+1
-            out_height = floor((height+2*padding[1]-dilation[1]*(kernel_size[1]-1)-1)/stride[1])+1
-            out_width = floor((width+2*padding[2]-dilation[2]*(kernel_size[2]-1)-1)/stride[2])+1
+              out_depth = floor((depth+2*padding[0]-dilation[0]*(kernel_size[0]-1)-1)/stride[0])+1
+              out_height = floor((height+2*padding[1]-dilation[1]*(kernel_size[1]-1)-1)/stride[1])+1
+              out_width = floor((width+2*padding[2]-dilation[2]*(kernel_size[2]-1)-1)/stride[2])+1
     """
     def __init__(self, channels, kernel_size, strides=(1, 1, 1), padding=(0, 0, 0),
                  dilation=(1, 1, 1), groups=1, layout='NCDHW', activation=None,
                  use_bias=True, weight_initializer=None, bias_initializer='zeros',
                  in_channels=0, **kwargs):
+        assert layout in ('NCDHW', 'NDHWC'), "Only supports 'NCDHW' and 'NDHWC' layout for now"
         if isinstance(kernel_size, numeric_types):
             kernel_size = (kernel_size,)*3
         assert len(kernel_size) == 3, "kernel_size must be a number or a list of 3 ints"
@@ -410,15 +420,19 @@ class Conv1DTranspose(_Conv):
     channels : int
         The dimensionality of the output space, i.e. the number of output
         channels (filters) in the convolution.
-    kernel_size :int or tuple/list of 3 int
+    kernel_size :int or tuple/list of 1 int
         Specifies the dimensions of the convolution window.
-    strides : int or tuple/list of 3 int,
+    strides : int or tuple/list of 1 int
         Specify the strides of the convolution.
-    padding : int or a tuple/list of 3 int,
+    padding : int or a tuple/list of 1 int,
         If padding is non-zero, then the input is implicitly zero-padded
         on both sides for padding number of points
-    dilation : int or tuple/list of 3 int
-        Specifies the dilation rate to use for dilated convolution.
+    output_padding: int or a tuple/list of 1 int
+        Controls the amount of implicit zero-paddings on both sides of the
+        output for output_padding number of points for each dimension.
+    dilation : int or tuple/list of 1 int
+        Controls the spacing between the kernel points; also known as the
+        a trous algorithm
     groups : int
         Controls the connections between inputs and outputs.
         At groups=1, all inputs are convolved to all outputs.
@@ -426,7 +440,7 @@ class Conv1DTranspose(_Conv):
         layers side by side, each seeing half the input channels, and producing
         half the output channels, and both subsequently concatenated.
     layout : str, default 'NCW'
-        Dimension ordering of data and weight. Can be 'NCW', 'NWC', etc.
+        Dimension ordering of data and weight. Only supports 'NCW' layout for now.
         'N', 'C', 'W' stands for batch, channel, and width (time) dimensions
         respectively. Convolution is applied on the 'W' dimension.
     in_channels : int, default 0
@@ -445,22 +459,21 @@ class Conv1DTranspose(_Conv):
         Initializer for the bias vector.
 
 
-    Input shape:
-        This depends on the `layout` parameter. Input is 3D array of shape
-        (batch_size, in_channels, width) if `layout` is `NCW`.
+    Inputs:
+        - **data**: 3D input tensor with shape `(batch_size, in_channels, width)`
+          when `layout` is `NCW`. For other layouts shape is permuted accordingly.
 
-    Output shape:
-        This depends on the `layout` parameter. Output is 3D array of shape
-        (batch_size, channels, out_width) if `layout` is `NCW`.
+    Outputs:
+        - **out**: 3D output tensor with shape `(batch_size, channels, out_width)`
+          when `layout` is `NCW`. out_width is calculated as::
 
-        out_width is calculated as::
-
-            out_width = (width-1)*strides-2*padding+kernel_size+output_padding
+              out_width = (width-1)*strides-2*padding+kernel_size+output_padding
     """
     def __init__(self, channels, kernel_size, strides=1, padding=0, output_padding=0,
                  dilation=1, groups=1, layout='NCW', activation=None, use_bias=True,
                  weight_initializer=None, bias_initializer='zeros',
                  in_channels=0, **kwargs):
+        assert layout == 'NCW', "Only supports 'NCW' layout for now"
         if isinstance(kernel_size, numeric_types):
             kernel_size = (kernel_size,)
         if isinstance(output_padding, numeric_types):
@@ -494,15 +507,19 @@ class Conv2DTranspose(_Conv):
     channels : int
         The dimensionality of the output space, i.e. the number of output
         channels (filters) in the convolution.
-    kernel_size :int or tuple/list of 3 int
+    kernel_size :int or tuple/list of 2 int
         Specifies the dimensions of the convolution window.
-    strides : int or tuple/list of 3 int,
+    strides : int or tuple/list of 2 int
         Specify the strides of the convolution.
-    padding : int or a tuple/list of 3 int,
+    padding : int or a tuple/list of 2 int,
         If padding is non-zero, then the input is implicitly zero-padded
         on both sides for padding number of points
-    dilation : int or tuple/list of 3 int
-        Specifies the dilation rate to use for dilated convolution.
+    output_padding: int or a tuple/list of 2 int
+        Controls the amount of implicit zero-paddings on both sides of the
+        output for output_padding number of points for each dimension.
+    dilation : int or tuple/list of 2 int
+        Controls the spacing between the kernel points; also known as the
+        a trous algorithm
     groups : int
         Controls the connections between inputs and outputs.
         At groups=1, all inputs are convolved to all outputs.
@@ -510,9 +527,9 @@ class Conv2DTranspose(_Conv):
         layers side by side, each seeing half the input channels, and producing
         half the output channels, and both subsequently concatenated.
     layout : str, default 'NCHW'
-        Dimension ordering of data and weight. Can be 'NCHW', 'NHWC', etc.
-        'N', 'C', 'H', 'W' stands for batch, channel, height, and width
-        dimensions respectively. Convolution is applied on the 'H' and
+        Dimension ordering of data and weight. Only supports 'NCHW' and 'NHWC'
+        layout for now. 'N', 'C', 'H', 'W' stands for batch, channel, height,
+        and width dimensions respectively. Convolution is applied on the 'H' and
         'W' dimensions.
     in_channels : int, default 0
         The number of input channels to this layer. If not specified,
@@ -530,23 +547,24 @@ class Conv2DTranspose(_Conv):
         Initializer for the bias vector.
 
 
-    Input shape:
-        This depends on the `layout` parameter. Input is 4D array of shape
-        (batch_size, in_channels, height, width) if `layout` is `NCHW`.
+    Inputs:
+        - **data**: 4D input tensor with shape
+          `(batch_size, in_channels, height, width)` when `layout` is `NCHW`.
+          For other layouts shape is permuted accordingly.
 
-    Output shape:
-        This depends on the `layout` parameter. Output is 4D array of shape
-        (batch_size, channels, out_height, out_width) if `layout` is `NCHW`.
+    Outputs:
+        - **out**: 4D output tensor with shape
+          `(batch_size, channels, out_height, out_width)` when `layout` is `NCHW`.
+          out_height and out_width are calculated as::
 
-        out_height and out_width are calculated as::
-
-            out_height = (height-1)*strides[0]-2*padding[0]+kernel_size[0]+output_padding[0]
-            out_width = (width-1)*strides[1]-2*padding[1]+kernel_size[1]+output_padding[1]
+              out_height = (height-1)*strides[0]-2*padding[0]+kernel_size[0]+output_padding[0]
+              out_width = (width-1)*strides[1]-2*padding[1]+kernel_size[1]+output_padding[1]
     """
     def __init__(self, channels, kernel_size, strides=(1, 1), padding=(0, 0),
                  output_padding=(0, 0), dilation=(1, 1), groups=1, layout='NCHW',
                  activation=None, use_bias=True, weight_initializer=None,
                  bias_initializer='zeros', in_channels=0, **kwargs):
+        assert layout in ('NCHW', 'NHWC'), "Only supports 'NCHW' and 'NHWC' layout for now"
         if isinstance(kernel_size, numeric_types):
             kernel_size = (kernel_size,)*2
         if isinstance(output_padding, numeric_types):
@@ -582,13 +600,17 @@ class Conv3DTranspose(_Conv):
         channels (filters) in the convolution.
     kernel_size :int or tuple/list of 3 int
         Specifies the dimensions of the convolution window.
-    strides : int or tuple/list of 3 int,
+    strides : int or tuple/list of 3 int
         Specify the strides of the convolution.
     padding : int or a tuple/list of 3 int,
         If padding is non-zero, then the input is implicitly zero-padded
         on both sides for padding number of points
+    output_padding: int or a tuple/list of 3 int
+        Controls the amount of implicit zero-paddings on both sides of the
+        output for output_padding number of points for each dimension.
     dilation : int or tuple/list of 3 int
-        Specifies the dilation rate to use for dilated convolution.
+        Controls the spacing between the kernel points; also known as the
+        a trous algorithm.
     groups : int
         Controls the connections between inputs and outputs.
         At groups=1, all inputs are convolved to all outputs.
@@ -596,10 +618,10 @@ class Conv3DTranspose(_Conv):
         layers side by side, each seeing half the input channels, and producing
         half the output channels, and both subsequently concatenated.
     layout : str, default 'NCDHW'
-        Dimension ordering of data and weight. Can be 'NCDHW', 'NDHWC', etc.
-        'N', 'C', 'H', 'W', 'D' stands for batch, channel, height, width and
-        depth dimensions respectively. Convolution is applied on the 'D',
-        'H', and 'W' dimensions.
+        Dimension ordering of data and weight. Only supports 'NCDHW' and 'NDHWC'
+        layout for now. 'N', 'C', 'H', 'W', 'D' stands for batch, channel, height,
+        width and depth dimensions respectively. Convolution is applied on the 'D',
+        'H' and 'W' dimensions.
     in_channels : int, default 0
         The number of input channels to this layer. If not specified,
         initialization will be deferred to the first time `forward` is called
@@ -616,14 +638,15 @@ class Conv3DTranspose(_Conv):
         Initializer for the bias vector.
 
 
-    Input shape:
-        This depends on the `layout` parameter. Input is 5D array of shape
-        (batch_size, in_channels, depth, height, width) if `layout` is `NCDHW`.
+    Inputs:
+        - **data**: 5D input tensor with shape
+          `(batch_size, in_channels, depth, height, width)` when `layout` is `NCDHW`.
+          For other layouts shape is permuted accordingly.
 
-    Output shape:
-        This depends on the `layout` parameter. Output is 5D array of shape
-        (batch_size, channels, out_depth, out_height, out_width) if `layout` is `NCDHW`.
-        out_depth, out_height and out_width are calculated as::
+    Outputs:
+        - **out**: 5D output tensor with shape
+          `(batch_size, channels, out_depth, out_height, out_width)` when `layout` is `NCDHW`.
+          out_depth, out_height and out_width are calculated as::
 
             out_depth = (depth-1)*strides[0]-2*padding[0]+kernel_size[0]+output_padding[0]
             out_height = (height-1)*strides[1]-2*padding[1]+kernel_size[1]+output_padding[1]
@@ -633,6 +656,7 @@ class Conv3DTranspose(_Conv):
                  output_padding=(0, 0, 0), dilation=(1, 1, 1), groups=1, layout='NCDHW',
                  activation=None, use_bias=True, weight_initializer=None,
                  bias_initializer='zeros', in_channels=0, **kwargs):
+        assert layout in ('NCDHW', 'NDHWC'), "Only supports 'NCDHW' and 'NDHWC' layout for now"
         if isinstance(kernel_size, numeric_types):
             kernel_size = (kernel_size,)*3
         if isinstance(output_padding, numeric_types):
@@ -649,7 +673,7 @@ class Conv3DTranspose(_Conv):
 class _Pooling(HybridBlock):
     """Abstract class for different pooling layers."""
     def __init__(self, pool_size, strides, padding, ceil_mode, global_pool,
-                 pool_type, **kwargs):
+                 pool_type, layout, count_include_pad=None, **kwargs):
         super(_Pooling, self).__init__(**kwargs)
         if strides is None:
             strides = pool_size
@@ -660,7 +684,10 @@ class _Pooling(HybridBlock):
         self._kwargs = {
             'kernel': pool_size, 'stride': strides, 'pad': padding,
             'global_pool': global_pool, 'pool_type': pool_type,
+            'layout': layout,
             'pooling_convention': 'full' if ceil_mode else 'valid'}
+        if count_include_pad is not None:
+            self._kwargs['count_include_pad'] = count_include_pad
 
     def _alias(self):
         return 'pool'
@@ -669,7 +696,8 @@ class _Pooling(HybridBlock):
         return F.Pooling(x, name='fwd', **self._kwargs)
 
     def __repr__(self):
-        s = '{name}(size={kernel}, stride={stride}, padding={pad}, ceil_mode={ceil_mode})'
+        s = '{name}(size={kernel}, stride={stride}, padding={pad}, ceil_mode={ceil_mode}'
+        s += ', global_pool={global_pool}, pool_type={pool_type}, layout={layout})'
         return s.format(name=self.__class__.__name__,
                         ceil_mode=self._kwargs['pooling_convention'] == 'full',
                         **self._kwargs)
@@ -690,36 +718,35 @@ class MaxPool1D(_Pooling):
         If padding is non-zero, then the input is implicitly
         zero-padded on both sides for padding number of points.
     layout : str, default 'NCW'
-        Dimension ordering of data and weight. Can be 'NCW', 'NWC', etc.
+        Dimension ordering of data and out ('NCW' or 'NWC').
         'N', 'C', 'W' stands for batch, channel, and width (time) dimensions
         respectively. Pooling is applied on the W dimension.
     ceil_mode : bool, default False
         When `True`, will use ceil instead of floor to compute the output shape.
 
 
-    Input shape:
-        This depends on the `layout` parameter. Input is 3D array of shape
-        (batch_size, channels, width) if `layout` is `NCW`.
+    Inputs:
+        - **data**: 3D input tensor with shape `(batch_size, in_channels, width)`
+          when `layout` is `NCW`. For other layouts shape is permuted accordingly.
 
-    Output shape:
-        This depends on the `layout` parameter. Output is 3D array of shape
-        (batch_size, channels, out_width) if `layout` is `NCW`.
+    Outputs:
+        - **out**: 3D output tensor with shape `(batch_size, channels, out_width)`
+          when `layout` is `NCW`. out_width is calculated as::
 
-        out_width is calculated as::
+              out_width = floor((width+2*padding-pool_size)/strides)+1
 
-            out_width = floor((width+2*padding-pool_size)/strides)+1
-
-        When `ceil_mode` is `True`, ceil will be used instead of floor in this
-        equation.
+          When `ceil_mode` is `True`, ceil will be used instead of floor in this
+          equation.
     """
     def __init__(self, pool_size=2, strides=None, padding=0, layout='NCW',
                  ceil_mode=False, **kwargs):
-        assert layout == 'NCW', "Only supports NCW layout for now"
+        assert layout in ('NCW', 'NWC'),\
+            "Only NCW and NWC layouts are valid for 1D Pooling"
         if isinstance(pool_size, numeric_types):
             pool_size = (pool_size,)
         assert len(pool_size) == 1, "pool_size must be a number or a list of 1 ints"
         super(MaxPool1D, self).__init__(
-            pool_size, strides, padding, ceil_mode, False, 'max', **kwargs)
+            pool_size, strides, padding, ceil_mode, False, 'max', layout, **kwargs)
 
 
 class MaxPool2D(_Pooling):
@@ -737,37 +764,38 @@ class MaxPool2D(_Pooling):
         If padding is non-zero, then the input is implicitly
         zero-padded on both sides for padding number of points.
     layout : str, default 'NCHW'
-        Dimension ordering of data and weight. Can be 'NCHW', 'NHWC', etc.
+        Dimension ordering of data and out ('NCHW' or 'NHWC').
         'N', 'C', 'H', 'W' stands for batch, channel, height, and width
         dimensions respectively. padding is applied on 'H' and 'W' dimension.
     ceil_mode : bool, default False
         When `True`, will use ceil instead of floor to compute the output shape.
 
 
-    Input shape:
-        This depends on the `layout` parameter. Input is 4D array of shape
-        (batch_size, channels, height, width) if `layout` is `NCHW`.
+    Inputs:
+        - **data**: 4D input tensor with shape
+          `(batch_size, in_channels, height, width)` when `layout` is `NCHW`.
+          For other layouts shape is permuted accordingly.
 
-    Output shape:
-        This depends on the `layout` parameter. Output is 4D array of shape
-        (batch_size, channels, out_height, out_width)  if `layout` is `NCHW`.
+    Outputs:
+        - **out**: 4D output tensor with shape
+          `(batch_size, channels, out_height, out_width)` when `layout` is `NCHW`.
+          out_height and out_width are calculated as::
 
-        out_height and out_width are calculated as::
+              out_height = floor((height+2*padding[0]-pool_size[0])/strides[0])+1
+              out_width = floor((width+2*padding[1]-pool_size[1])/strides[1])+1
 
-            out_height = floor((height+2*padding[0]-pool_size[0])/strides[0])+1
-            out_width = floor((width+2*padding[1]-pool_size[1])/strides[1])+1
-
-        When `ceil_mode` is `True`, ceil will be used instead of floor in this
-        equation.
+          When `ceil_mode` is `True`, ceil will be used instead of floor in this
+          equation.
     """
     def __init__(self, pool_size=(2, 2), strides=None, padding=0, layout='NCHW',
                  ceil_mode=False, **kwargs):
-        assert layout == 'NCHW', "Only supports NCHW layout for now"
+        assert layout in ('NCHW', 'NHWC'),\
+            "Only NCHW and NHWC layouts are valid for 2D Pooling"
         if isinstance(pool_size, numeric_types):
             pool_size = (pool_size,)*2
         assert len(pool_size) == 2, "pool_size must be a number or a list of 2 ints"
         super(MaxPool2D, self).__init__(
-            pool_size, strides, padding, ceil_mode, False, 'max', **kwargs)
+            pool_size, strides, padding, ceil_mode, False, 'max', layout, **kwargs)
 
 
 class MaxPool3D(_Pooling):
@@ -785,7 +813,7 @@ class MaxPool3D(_Pooling):
         If padding is non-zero, then the input is implicitly
         zero-padded on both sides for padding number of points.
     layout : str, default 'NCDHW'
-        Dimension ordering of data and weight. Can be 'NCDHW', 'NDHWC', etc.
+        Dimension ordering of data and out ('NCDHW' or 'NDHWC').
         'N', 'C', 'H', 'W', 'D' stands for batch, channel, height, width and
         depth dimensions respectively. padding is applied on 'D', 'H' and 'W'
         dimension.
@@ -793,32 +821,32 @@ class MaxPool3D(_Pooling):
         When `True`, will use ceil instead of floor to compute the output shape.
 
 
-    Input shape:
-        This depends on the `layout` parameter. Input is 5D array of shape
-        (batch_size, channels, depth, height, width) if `layout` is `NCDHW`.
+    Inputs:
+        - **data**: 5D input tensor with shape
+          `(batch_size, in_channels, depth, height, width)` when `layout` is `NCW`.
+          For other layouts shape is permuted accordingly.
 
-    Output shape:
-        This depends on the `layout` parameter. Output is 5D array of shape
-        (batch_size, channels, out_depth, out_height, out_width) if `layout`
-        is `NCDHW`.
+    Outputs:
+        - **out**: 5D output tensor with shape
+          `(batch_size, channels, out_depth, out_height, out_width)` when `layout` is `NCDHW`.
+          out_depth, out_height and out_width are calculated as::
 
-        out_depth, out_height and out_width are calculated as ::
+              out_depth = floor((depth+2*padding[0]-pool_size[0])/strides[0])+1
+              out_height = floor((height+2*padding[1]-pool_size[1])/strides[1])+1
+              out_width = floor((width+2*padding[2]-pool_size[2])/strides[2])+1
 
-            out_depth = floor((depth+2*padding[0]-pool_size[0])/strides[0])+1
-            out_height = floor((height+2*padding[1]-pool_size[1])/strides[1])+1
-            out_width = floor((width+2*padding[2]-pool_size[2])/strides[2])+1
-
-        When `ceil_mode` is `True`, ceil will be used instead of floor in this
-        equation.
+          When `ceil_mode` is `True`, ceil will be used instead of floor in this
+          equation.
     """
     def __init__(self, pool_size=(2, 2, 2), strides=None, padding=0,
                  ceil_mode=False, layout='NCDHW', **kwargs):
-        assert layout == 'NCDHW', "Only supports NCDHW layout for now"
+        assert layout in ('NCDHW', 'NDHWC'),\
+            "Only NCDHW and NDHWC layouts are valid for 3D Pooling"
         if isinstance(pool_size, numeric_types):
             pool_size = (pool_size,)*3
         assert len(pool_size) == 3, "pool_size must be a number or a list of 3 ints"
         super(MaxPool3D, self).__init__(
-            pool_size, strides, padding, ceil_mode, False, 'max', **kwargs)
+            pool_size, strides, padding, ceil_mode, False, 'max', layout, **kwargs)
 
 
 class AvgPool1D(_Pooling):
@@ -827,7 +855,7 @@ class AvgPool1D(_Pooling):
     Parameters
     ----------
     pool_size: int
-        Size of the max pooling windows.
+        Size of the average pooling windows.
     strides: int, or None
         Factor by which to downscale. E.g. 2 will halve the input size.
         If `None`, it will default to `pool_size`.
@@ -835,36 +863,38 @@ class AvgPool1D(_Pooling):
         If padding is non-zero, then the input is implicitly
         zero-padded on both sides for padding number of points.
     layout : str, default 'NCW'
-        Dimension ordering of data and weight. Can be 'NCW', 'NWC', etc.
+        Dimension ordering of data and out ('NCW' or 'NWC').
         'N', 'C', 'W' stands for batch, channel, and width (time) dimensions
         respectively. padding is applied on 'W' dimension.
     ceil_mode : bool, default False
         When `True`, will use ceil instead of floor to compute the output shape.
+    count_include_pad : bool, default True
+        When 'False', will exclude padding elements when computing the average value.
 
 
-    Input shape:
-        This depends on the `layout` parameter. Input is 3D array of shape
-        (batch_size, channels, width) if `layout` is `NCW`.
+    Inputs:
+        - **data**: 3D input tensor with shape `(batch_size, in_channels, width)`
+          when `layout` is `NCW`. For other layouts shape is permuted accordingly.
 
-    Output shape:
-        This depends on the `layout` parameter. Output is 3D array of shape
-        (batch_size, channels, out_width) if `layout` is `NCW`.
+    Outputs:
+        - **out**: 3D output tensor with shape `(batch_size, channels, out_width)`
+          when `layout` is `NCW`. out_width is calculated as::
 
-        out_width is calculated as::
+              out_width = floor((width+2*padding-pool_size)/strides)+1
 
-            out_width = floor((width+2*padding-pool_size)/strides)+1
-
-        When `ceil_mode` is `True`, ceil will be used instead of floor in this
-        equation.
+          When `ceil_mode` is `True`, ceil will be used instead of floor in this
+          equation.
     """
     def __init__(self, pool_size=2, strides=None, padding=0, layout='NCW',
-                 ceil_mode=False, **kwargs):
-        assert layout == 'NCW', "Only supports NCW layout for now"
+                 ceil_mode=False, count_include_pad=True, **kwargs):
+        assert layout in ('NCW', 'NWC'),\
+            "Only NCW and NWC layouts are valid for 1D Pooling"
         if isinstance(pool_size, numeric_types):
             pool_size = (pool_size,)
         assert len(pool_size) == 1, "pool_size must be a number or a list of 1 ints"
         super(AvgPool1D, self).__init__(
-            pool_size, strides, padding, ceil_mode, False, 'avg', **kwargs)
+            pool_size, strides, padding, ceil_mode, False, 'avg', layout, count_include_pad,
+            **kwargs)
 
 
 class AvgPool2D(_Pooling):
@@ -873,7 +903,7 @@ class AvgPool2D(_Pooling):
     Parameters
     ----------
     pool_size: int or list/tuple of 2 ints,
-        Size of the max pooling windows.
+        Size of the average pooling windows.
     strides: int, list/tuple of 2 ints, or None.
         Factor by which to downscale. E.g. 2 will halve the input size.
         If `None`, it will default to `pool_size`.
@@ -881,37 +911,41 @@ class AvgPool2D(_Pooling):
         If padding is non-zero, then the input is implicitly
         zero-padded on both sides for padding number of points.
     layout : str, default 'NCHW'
-        Dimension ordering of data and weight. Can be 'NCHW', 'NHWC', etc.
+        Dimension ordering of data and out ('NCHW' or 'NHWC').
         'N', 'C', 'H', 'W' stands for batch, channel, height, and width
         dimensions respectively. padding is applied on 'H' and 'W' dimension.
     ceil_mode : bool, default False
         When True, will use ceil instead of floor to compute the output shape.
+    count_include_pad : bool, default True
+        When 'False', will exclude padding elements when computing the average value.
 
 
-    Input shape:
-        This depends on the `layout` parameter. Input is 4D array of shape
-        (batch_size, channels, height, width) if `layout` is `NCHW`.
+    Inputs:
+        - **data**: 4D input tensor with shape
+          `(batch_size, in_channels, height, width)` when `layout` is `NCHW`.
+          For other layouts shape is permuted accordingly.
 
-    Output shape:
-        This depends on the `layout` parameter. Output is 4D array of shape
-        (batch_size, channels, out_height, out_width)  if `layout` is `NCHW`.
+    Outputs:
+        - **out**: 4D output tensor with shape
+          `(batch_size, channels, out_height, out_width)` when `layout` is `NCHW`.
+          out_height and out_width are calculated as::
 
-        out_height and out_width are calculated as::
+              out_height = floor((height+2*padding[0]-pool_size[0])/strides[0])+1
+              out_width = floor((width+2*padding[1]-pool_size[1])/strides[1])+1
 
-            out_height = floor((height+2*padding[0]-pool_size[0])/strides[0])+1
-            out_width = floor((width+2*padding[1]-pool_size[1])/strides[1])+1
-
-        When `ceil_mode` is `True`, ceil will be used instead of floor in this
-        equation.
+          When `ceil_mode` is `True`, ceil will be used instead of floor in this
+          equation.
     """
     def __init__(self, pool_size=(2, 2), strides=None, padding=0,
-                 ceil_mode=False, layout='NCHW', **kwargs):
-        assert layout == 'NCHW', "Only supports NCHW layout for now"
+                 ceil_mode=False, layout='NCHW', count_include_pad=True, **kwargs):
+        assert layout in ('NCHW', 'NHWC'),\
+            "Only NCHW and NHWC layouts are valid for 2D Pooling"
         if isinstance(pool_size, numeric_types):
             pool_size = (pool_size,)*2
         assert len(pool_size) == 2, "pool_size must be a number or a list of 2 ints"
         super(AvgPool2D, self).__init__(
-            pool_size, strides, padding, ceil_mode, False, 'avg', **kwargs)
+            pool_size, strides, padding, ceil_mode, False, 'avg', layout, count_include_pad,
+            **kwargs)
 
 
 class AvgPool3D(_Pooling):
@@ -920,7 +954,7 @@ class AvgPool3D(_Pooling):
     Parameters
     ----------
     pool_size: int or list/tuple of 3 ints,
-        Size of the max pooling windows.
+        Size of the average pooling windows.
     strides: int, list/tuple of 3 ints, or None.
         Factor by which to downscale. E.g. 2 will halve the input size.
         If `None`, it will default to `pool_size`.
@@ -928,84 +962,243 @@ class AvgPool3D(_Pooling):
         If padding is non-zero, then the input is implicitly
         zero-padded on both sides for padding number of points.
     layout : str, default 'NCDHW'
-        Dimension ordering of data and weight. Can be 'NCDHW', 'NDHWC', etc.
+        Dimension ordering of data and out ('NCDHW' or 'NDHWC').
         'N', 'C', 'H', 'W', 'D' stands for batch, channel, height, width and
         depth dimensions respectively. padding is applied on 'D', 'H' and 'W'
         dimension.
     ceil_mode : bool, default False
         When True, will use ceil instead of floor to compute the output shape.
+    count_include_pad : bool, default True
+        When 'False', will exclude padding elements when computing the average value.
 
 
-    Input shape:
-        This depends on the `layout` parameter. Input is 5D array of shape
-        (batch_size, channels, depth, height, width) if `layout` is `NCDHW`.
+    Inputs:
+        - **data**: 5D input tensor with shape
+          `(batch_size, in_channels, depth, height, width)` when `layout` is `NCDHW`.
+          For other layouts shape is permuted accordingly.
 
-    Output shape:
-        This depends on the `layout` parameter. Output is 5D array of shape
-        (batch_size, channels, out_depth, out_height, out_width) if `layout`
-        is `NCDHW`.
+    Outputs:
+        - **out**: 5D output tensor with shape
+          `(batch_size, channels, out_depth, out_height, out_width)` when `layout` is `NCDHW`.
+          out_depth, out_height and out_width are calculated as::
 
-        out_depth, out_height and out_width are calculated as ::
+              out_depth = floor((depth+2*padding[0]-pool_size[0])/strides[0])+1
+              out_height = floor((height+2*padding[1]-pool_size[1])/strides[1])+1
+              out_width = floor((width+2*padding[2]-pool_size[2])/strides[2])+1
 
-            out_depth = floor((depth+2*padding[0]-pool_size[0])/strides[0])+1
-            out_height = floor((height+2*padding[1]-pool_size[1])/strides[1])+1
-            out_width = floor((width+2*padding[2]-pool_size[2])/strides[2])+1
-
-        When `ceil_mode` is `True,` ceil will be used instead of floor in this
-        equation.
+          When `ceil_mode` is `True,` ceil will be used instead of floor in this
+          equation.
     """
     def __init__(self, pool_size=(2, 2, 2), strides=None, padding=0,
-                 ceil_mode=False, layout='NCDHW', **kwargs):
-        assert layout == 'NCDHW', "Only supports NCDHW layout for now"
+                 ceil_mode=False, layout='NCDHW', count_include_pad=True, **kwargs):
+        assert layout in ('NCDHW', 'NDHWC'),\
+            "Only NCDHW and NDHWC layouts are valid for 3D Pooling"
         if isinstance(pool_size, numeric_types):
             pool_size = (pool_size,)*3
         assert len(pool_size) == 3, "pool_size must be a number or a list of 3 ints"
         super(AvgPool3D, self).__init__(
-            pool_size, strides, padding, ceil_mode, False, 'avg', **kwargs)
+            pool_size, strides, padding, ceil_mode, False, 'avg', layout, count_include_pad,
+            **kwargs)
 
 
 class GlobalMaxPool1D(_Pooling):
-    """Global max pooling operation for temporal data."""
+    """Gloabl max pooling operation for one dimensional (temporal) data.
+
+
+    Parameters
+    ----------
+    layout : str, default 'NCW'
+        Dimension ordering of data and out ('NCW' or 'NWC').
+        'N', 'C', 'W' stands for batch, channel, and width (time) dimensions
+        respectively. Pooling is applied on the W dimension.
+
+
+    Inputs:
+        - **data**: 3D input tensor with shape `(batch_size, in_channels, width)`
+          when `layout` is `NCW`. For other layouts shape is permuted accordingly.
+
+    Outputs:
+        - **out**: 3D output tensor with shape `(batch_size, channels, 1)`
+          when `layout` is `NCW`.
+    """
     def __init__(self, layout='NCW', **kwargs):
-        assert layout == 'NCW', "Only supports NCW layout for now"
+        assert layout in ('NCW', 'NWC'),\
+            "Only NCW and NWC layouts are valid for 1D Pooling"
         super(GlobalMaxPool1D, self).__init__(
-            (1,), None, 0, True, True, 'max', **kwargs)
+            (1,), None, 0, True, True, 'max', layout, **kwargs)
 
 
 class GlobalMaxPool2D(_Pooling):
-    """Global max pooling operation for spatial data."""
+    """Global max pooling operation for two dimensional (spatial) data.
+
+
+    Parameters
+    ----------
+    layout : str, default 'NCHW'
+        Dimension ordering of data and out ('NCHW' or 'NHWC').
+        'N', 'C', 'H', 'W' stands for batch, channel, height, and width
+        dimensions respectively. padding is applied on 'H' and 'W' dimension.
+
+
+    Inputs:
+        - **data**: 4D input tensor with shape
+          `(batch_size, in_channels, height, width)` when `layout` is `NCHW`.
+          For other layouts shape is permuted accordingly.
+
+    Outputs:
+        - **out**: 4D output tensor with shape
+          `(batch_size, channels, 1, 1)` when `layout` is `NCHW`.
+    """
     def __init__(self, layout='NCHW', **kwargs):
-        assert layout == 'NCHW', "Only supports NCW layout for now"
+        assert layout in ('NCHW', 'NHWC'),\
+            "Only NCHW and NHWC layouts are valid for 2D Pooling"
         super(GlobalMaxPool2D, self).__init__(
-            (1, 1), None, 0, True, True, 'max', **kwargs)
+            (1, 1), None, 0, True, True, 'max', layout, **kwargs)
+
 
 class GlobalMaxPool3D(_Pooling):
-    """Global max pooling operation for 3D data."""
+    """Global max pooling operation for 3D data (spatial or spatio-temporal).
+
+
+    Parameters
+    ----------
+    layout : str, default 'NCDHW'
+        Dimension ordering of data and out ('NCDHW' or 'NDHWC').
+        'N', 'C', 'H', 'W', 'D' stands for batch, channel, height, width and
+        depth dimensions respectively. padding is applied on 'D', 'H' and 'W'
+        dimension.
+
+
+    Inputs:
+        - **data**: 5D input tensor with shape
+          `(batch_size, in_channels, depth, height, width)` when `layout` is `NCW`.
+          For other layouts shape is permuted accordingly.
+
+    Outputs:
+        - **out**: 5D output tensor with shape
+          `(batch_size, channels, 1, 1, 1)` when `layout` is `NCDHW`.
+    """
     def __init__(self, layout='NCDHW', **kwargs):
-        assert layout == 'NCDHW', "Only supports NCW layout for now"
+        assert layout in ('NCDHW', 'NDHWC'),\
+            "Only NCDHW and NDHWC layouts are valid for 3D Pooling"
         super(GlobalMaxPool3D, self).__init__(
-            (1, 1, 1), None, 0, True, True, 'max', **kwargs)
+            (1, 1, 1), None, 0, True, True, 'max', layout, **kwargs)
 
 
 class GlobalAvgPool1D(_Pooling):
-    """Global average pooling operation for temporal data."""
+    """Global average pooling operation for temporal data.
+
+    Parameters
+    ----------
+    layout : str, default 'NCW'
+        Dimension ordering of data and out ('NCW' or 'NWC').
+        'N', 'C', 'W' stands for batch, channel, and width (time) dimensions
+        respectively. padding is applied on 'W' dimension.
+
+
+    Inputs:
+        - **data**: 3D input tensor with shape `(batch_size, in_channels, width)`
+          when `layout` is `NCW`. For other layouts shape is permuted accordingly.
+
+    Outputs:
+        - **out**: 3D output tensor with shape `(batch_size, channels, 1)`.
+    """
     def __init__(self, layout='NCW', **kwargs):
-        assert layout == 'NCW', "Only supports NCW layout for now"
+        assert layout in ('NCW', 'NWC'),\
+            "Only NCW and NWC layouts are valid for 1D Pooling"
         super(GlobalAvgPool1D, self).__init__(
-            (1,), None, 0, True, True, 'avg', **kwargs)
+            (1,), None, 0, True, True, 'avg', layout, **kwargs)
 
 
 class GlobalAvgPool2D(_Pooling):
-    """Global average pooling operation for spatial data."""
+    """Global average pooling operation for spatial data.
+
+    Parameters
+    ----------
+    layout : str, default 'NCHW'
+        Dimension ordering of data and out ('NCHW' or 'NHWC').
+        'N', 'C', 'H', 'W' stands for batch, channel, height, and width
+        dimensions respectively.
+
+
+    Inputs:
+        - **data**: 4D input tensor with shape
+          `(batch_size, in_channels, height, width)` when `layout` is `NCHW`.
+          For other layouts shape is permuted accordingly.
+
+    Outputs:
+        - **out**: 4D output tensor with shape
+          `(batch_size, channels, 1, 1)` when `layout` is `NCHW`.
+    """
     def __init__(self, layout='NCHW', **kwargs):
-        assert layout == 'NCHW', "Only supports NCW layout for now"
+        assert layout in ('NCHW', 'NHWC'),\
+            "Only NCHW and NHWC layouts are valid for 2D Pooling"
         super(GlobalAvgPool2D, self).__init__(
-            (1, 1), None, 0, True, True, 'avg', **kwargs)
+            (1, 1), None, 0, True, True, 'avg', layout, **kwargs)
 
 
 class GlobalAvgPool3D(_Pooling):
-    """Global max pooling operation for 3D data."""
+    """Global average pooling operation for 3D data (spatial or spatio-temporal).
+
+    Parameters
+    ----------
+    layout : str, default 'NCDHW'
+        Dimension ordering of data and out ('NCDHW' or 'NDHWC').
+        'N', 'C', 'H', 'W', 'D' stands for batch, channel, height, width and
+        depth dimensions respectively. padding is applied on 'D', 'H' and 'W'
+        dimension.
+
+
+    Inputs:
+        - **data**: 5D input tensor with shape
+          `(batch_size, in_channels, depth, height, width)` when `layout` is `NCDHW`.
+          For other layouts shape is permuted accordingly.
+
+    Outputs:
+        - **out**: 5D output tensor with shape
+          `(batch_size, channels, 1, 1, 1)` when `layout` is `NCDHW`.
+    """
     def __init__(self, layout='NCDHW', **kwargs):
-        assert layout == 'NCDHW', "Only supports NCW layout for now"
+        assert layout in ('NCDHW', 'NDHWC'),\
+            "Only NCDHW and NDHWC layouts are valid for 3D Pooling"
         super(GlobalAvgPool3D, self).__init__(
-            (1, 1, 1), None, 0, True, True, 'avg', **kwargs)
+            (1, 1, 1), None, 0, True, True, 'avg', layout, **kwargs)
+
+
+class ReflectionPad2D(HybridBlock):
+    r"""Pads the input tensor using the reflection of the input boundary.
+
+    Parameters
+    ----------
+    padding: int
+        An integer padding size
+
+
+    Inputs:
+        - **data**: input tensor with the shape :math:`(N, C, H_{in}, W_{in})`.
+
+    Outputs:
+        - **out**: output tensor with the shape :math:`(N, C, H_{out}, W_{out})`, where
+
+          .. math::
+
+            H_{out} = H_{in} + 2 \cdot padding
+
+            W_{out} = W_{in} + 2 \cdot padding
+
+
+    Examples
+    --------
+    >>> m = nn.ReflectionPad2D(3)
+    >>> input = mx.nd.random.normal(shape=(16, 3, 224, 224))
+    >>> output = m(input)
+    """
+    def __init__(self, padding=0, **kwargs):
+        super(ReflectionPad2D, self).__init__(**kwargs)
+        if isinstance(padding, numeric_types):
+            padding = (0, 0, 0, 0, padding, padding, padding, padding)
+        assert(len(padding) == 8)
+        self._padding = padding
+
+    def hybrid_forward(self, F, x):
+        return F.pad(x, mode='reflect', pad_width=self._padding)

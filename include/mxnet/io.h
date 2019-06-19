@@ -18,18 +18,19 @@
  */
 
 /*!
+ *  Copyright (c) 2015 by Contributors
  * \file io.h
  * \brief mxnet io data structure and data iterator
  */
 #ifndef MXNET_IO_H_
 #define MXNET_IO_H_
 
-#include <dmlc/data.h>
-#include <dmlc/registry.h>
 #include <vector>
 #include <string>
 #include <utility>
 #include <queue>
+#include "dmlc/data.h"
+#include "dmlc/registry.h"
 #include "./base.h"
 #include "./ndarray.h"
 

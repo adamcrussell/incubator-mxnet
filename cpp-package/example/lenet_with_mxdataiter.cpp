@@ -19,16 +19,15 @@
 
 /*!
  */
-#include <iostream>
-#include <fstream>
 #include <map>
 #include <string>
 #include <vector>
+#include <fstream>
+#include <chrono>
+#include <cstdlib>
+#include "utils.h"
 #include "mxnet-cpp/MxNetCpp.h"
-// Allow IDE to parse the types
-#include "../include/mxnet-cpp/op.h"
 
-using namespace std;
 using namespace mxnet::cpp;
 
 Symbol LenetSymbol() {
@@ -67,40 +66,66 @@ Symbol LenetSymbol() {
   return lenet;
 }
 
+NDArray ResizeInput(NDArray data, const Shape new_shape) {
+  NDArray pic = data.Reshape(Shape(0, 1, 28, 28));
+  NDArray output;
+  Operator("_contrib_BilinearResize2D")
+    .SetParam("height", new_shape[2])
+    .SetParam("width", new_shape[3])
+    (pic).Invoke(output);
+  return output;
+}
+
 int main(int argc, char const *argv[]) {
   /*setup basic configs*/
   int W = 28;
   int H = 28;
   int batch_size = 128;
-  int max_epoch = 100;
+  int max_epoch = argc > 1 ? strtol(argv[1], NULL, 10) : 100;
   float learning_rate = 1e-4;
   float weight_decay = 1e-4;
 
+  auto dev_ctx = Context::cpu();
+  int num_gpu;
+  MXGetGPUCount(&num_gpu);
+#if !MXNET_USE_CPU
+  if (num_gpu > 0) {
+    dev_ctx = Context::gpu();
+  }
+#endif
+
+  TRY
   auto lenet = LenetSymbol();
-  std::map<string, NDArray> args_map;
+  std::map<std::string, NDArray> args_map;
 
-  args_map["data"] = NDArray(Shape(batch_size, 1, W, H), Context::gpu());
-  args_map["data_label"] = NDArray(Shape(batch_size), Context::gpu());
-  lenet.InferArgsMap(Context::gpu(), &args_map, args_map);
+  const Shape data_shape = Shape(batch_size, 1, H, W),
+              label_shape = Shape(batch_size);
+  args_map["data"] = NDArray(data_shape, dev_ctx);
+  args_map["data_label"] = NDArray(label_shape, dev_ctx);
+  lenet.InferArgsMap(dev_ctx, &args_map, args_map);
 
-  args_map["fc1_w"] = NDArray(Shape(500, 4 * 4 * 50), Context::gpu());
+  args_map["fc1_w"] = NDArray(Shape(500, 4 * 4 * 50), dev_ctx);
   NDArray::SampleGaussian(0, 1, &args_map["fc1_w"]);
-  args_map["fc2_b"] = NDArray(Shape(10), Context::gpu());
+  args_map["fc2_b"] = NDArray(Shape(10), dev_ctx);
   args_map["fc2_b"] = 0;
 
-  auto train_iter = MXDataIter("MNISTIter")
-      .SetParam("image", "./train-images-idx3-ubyte")
-      .SetParam("label", "./train-labels-idx1-ubyte")
-      .SetParam("batch_size", batch_size)
-      .SetParam("shuffle", 1)
-      .SetParam("flat", 0)
-      .CreateDataIter();
-  auto val_iter = MXDataIter("MNISTIter")
-      .SetParam("image", "./t10k-images-idx3-ubyte")
-      .SetParam("label", "./t10k-labels-idx1-ubyte")
-      .CreateDataIter();
+  std::vector<std::string> data_files = { "./data/mnist_data/train-images-idx3-ubyte",
+                                          "./data/mnist_data/train-labels-idx1-ubyte",
+                                          "./data/mnist_data/t10k-images-idx3-ubyte",
+                                          "./data/mnist_data/t10k-labels-idx1-ubyte"
+                                        };
 
-  Optimizer* opt = OptimizerRegistry::Find("ccsgd");
+  auto train_iter =  MXDataIter("MNISTIter");
+  if (!setDataIter(&train_iter, "Train", data_files, batch_size)) {
+    return 1;
+  }
+
+  auto val_iter = MXDataIter("MNISTIter");
+  if (!setDataIter(&val_iter, "Label", data_files, batch_size)) {
+    return 1;
+  }
+
+  Optimizer* opt = OptimizerRegistry::Find("sgd");
   opt->SetParam("momentum", 0.9)
      ->SetParam("rescale_grad", 1.0)
      ->SetParam("clip_gradient", 10)
@@ -108,41 +133,71 @@ int main(int argc, char const *argv[]) {
      ->SetParam("wd", weight_decay);
 
 
-  auto *exec = lenet.SimpleBind(Context::gpu(), args_map);
+  auto *exec = lenet.SimpleBind(dev_ctx, args_map);
   auto arg_names = lenet.ListArguments();
 
+  // Create metrics
+  Accuracy train_acc, val_acc;
+
   for (int iter = 0; iter < max_epoch; ++iter) {
-    LG << "Epoch: " << iter;
-    train_iter.Reset();
-    while (train_iter.Next()) {
+      int samples = 0;
+      train_iter.Reset();
+      train_acc.Reset();
+
+      auto tic = std::chrono::system_clock::now();
+
+     while (train_iter.Next()) {
+      samples += batch_size;
       auto data_batch = train_iter.GetDataBatch();
-      args_map["data"] = data_batch.data.Copy(Context::gpu());
-      args_map["data_label"] = data_batch.label.Copy(Context::gpu());
+
+      ResizeInput(data_batch.data, data_shape).CopyTo(&args_map["data"]);
+      data_batch.label.CopyTo(&args_map["data_label"]);
       NDArray::WaitAll();
+
+      // Compute gradients
       exec->Forward(true);
       exec->Backward();
+
       // Update parameters
       for (size_t i = 0; i < arg_names.size(); ++i) {
         if (arg_names[i] == "data" || arg_names[i] == "data_label") continue;
         opt->Update(i, exec->arg_arrays[i], exec->grad_arrays[i]);
       }
+
+      // Update metric
+      train_acc.Update(data_batch.label, exec->outputs[0]);
     }
+
+     // one epoch of training is finished
+     auto toc = std::chrono::system_clock::now();
+     float duration = std::chrono::duration_cast<std::chrono::milliseconds>
+                      (toc - tic).count() / 1000.0;
+     LG << "Epoch[" << iter << "] " << samples / duration \
+         << " samples/sec " << "Train-Accuracy=" << train_acc.Get();;
+
+      val_iter.Reset();
+      val_acc.Reset();
 
     Accuracy acu;
     val_iter.Reset();
     while (val_iter.Next()) {
       auto data_batch = val_iter.GetDataBatch();
-      args_map["data"] = data_batch.data.Copy(Context::gpu());
-      args_map["data_label"] = data_batch.label.Copy(Context::gpu());
+      ResizeInput(data_batch.data, data_shape).CopyTo(&args_map["data"]);
+      data_batch.label.CopyTo(&args_map["data_label"]);
       NDArray::WaitAll();
+
+      // Only forward pass is enough as no gradient is needed when evaluating
       exec->Forward(false);
       NDArray::WaitAll();
       acu.Update(data_batch.label, exec->outputs[0]);
+      val_acc.Update(data_batch.label, exec->outputs[0]);
     }
-    LG << "Accuracy: " << acu.Get();
+    LG << "Epoch[" << iter << "] Val-Accuracy=" << val_acc.Get();
   }
 
   delete exec;
+  delete opt;
   MXNotifyShutdown();
+  CATCH
   return 0;
 }

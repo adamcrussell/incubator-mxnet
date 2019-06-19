@@ -18,12 +18,15 @@
  */
 
 /*!
+ * Copyright (c) 2015 by Contributors
  * \file storage_manager.h
  * \brief Storage manager.
  */
+
 #ifndef MXNET_STORAGE_STORAGE_MANAGER_H_
 #define MXNET_STORAGE_STORAGE_MANAGER_H_
 
+#include <mxnet/storage.h>
 #include <cstddef>
 
 namespace mxnet {
@@ -36,22 +39,27 @@ class StorageManager {
  public:
   /*!
    * \brief Allocation.
-   * \param size Size to allocate.
-   * \return Pointer to the storage.
+   * \param handle Handle struct.
    */
-  virtual void* Alloc(size_t size) = 0;
+  virtual void Alloc(Storage::Handle* handle) = 0;
   /*!
    * \brief Deallocation.
-   * \param ptr Pointer to deallocate.
-   * \param size Size of the storage.
+   * \param handle Handle struct.
    */
-  virtual void Free(void* ptr, size_t size) = 0;
+  virtual void Free(Storage::Handle handle) = 0;
   /*!
-   * \brief Direct de-allocation.
-   * \param ptr Pointer to deallocate.
-   * \param size Size of the storage.
+   * \brief Direct deallocation.
+   * \param handle Handle struct.
    */
-  virtual void DirectFree(void* ptr, size_t size) = 0;
+  virtual void DirectFree(Storage::Handle handle) = 0;
+  /*!
+  * \brief Release all memory if using a pool storage manager
+  *
+  * This release all memory from pool storage managers such as
+  * GPUPooledStorageManager and GPUPooledRoundedStorageManager.
+  * For non-pool memory managers this has no effect.
+  */
+  virtual void ReleaseAll() {}
   /*!
    * \brief Destructor.
    */

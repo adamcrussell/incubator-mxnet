@@ -18,6 +18,7 @@
  */
 
 /*!
+ * Copyright (c) 2017 by Contributors
  * \file sample_multinomial_op.h
  * \brief Operator for sampling from multinomial distributions
  */
@@ -26,7 +27,7 @@
 namespace mxnet {
 namespace op {
 
-NNVM_REGISTER_OP(sample_multinomial)
+NNVM_REGISTER_OP(_sample_multinomial)
 .set_attr<FCompute>("FCompute<gpu>", SampleMultinomialForward<gpu>);
 
 
@@ -36,7 +37,8 @@ struct SampleMultinomialBackwardGPUKernel {
                                   DType* ograd, DType* dist, IType* out,
                                   DType* igrad) {
     for (index_t j = 0; j < M; ++j) {
-      atomicAdd(&igrad[i*K + out[i*M + j]], ograd[i*M + j] / dist[i*K + out[i*M + j]]);
+      atomicAdd(&igrad[i*K + static_cast<size_t>(out[i*M + j])],
+        ograd[i*M + j] / dist[i*K + static_cast<size_t>(out[i*M + j])]);
     }
   }
 };

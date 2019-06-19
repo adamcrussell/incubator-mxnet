@@ -18,6 +18,7 @@
  */
 
 /*!
+ * Copyright (c) 2015 by Contributors
  */
 #ifndef MXNET_ENGINE_STREAM_MANAGER_H_
 #define MXNET_ENGINE_STREAM_MANAGER_H_
@@ -50,10 +51,12 @@ class StreamManager {
   RunContext GetIORunContext(Context const& ctx);
   void Finalize();
  private:
-  std::mutex m_;
+  std::mutex mutex_;
 #if MXNET_USE_CUDA
   std::array<std::array<mshadow::Stream<gpu>*, kStreams>, kNumGpus>
       gpu_streams_;
+  std::array<std::array<GPUAuxStream*, kStreams>, kNumGpus>
+      gpu_aux_streams_;
   std::array<mshadow::Stream<gpu>*, kNumGpus> gpu_io_streams_;
   std::array<int, kNumGpus> gpu_cnt_;
 #endif  // MXNET_USE_CUDA
@@ -66,29 +69,39 @@ RunContext StreamManager<kNumGpus, kStreams>::GetRunContext(
   RunContext ret;
   switch (ctx.dev_mask()) {
     case cpu::kDevMask:
-      ret = RunContext{ctx, nullptr};
+      ret = RunContext{ctx, nullptr, nullptr, false};
       break;
     case gpu::kDevMask: {
 #if MXNET_USE_CUDA
       std::size_t use_counter;
-      CUDA_CALL(cudaSetDevice(ctx.dev_id));
       {
-        std::lock_guard<std::mutex> lock{m_};
+        std::lock_guard<std::mutex> lock{mutex_};
         auto&& counter = gpu_cnt_.at(ctx.dev_id);
         if (counter == -1) {
-          for (auto&& i : gpu_streams_.at(ctx.dev_id)) {
-            i = mshadow::NewStream<gpu>(true, MXNET_USE_CUDNN != 0);
+          mxnet::common::cuda::DeviceStore device_store(ctx.dev_id);
+          for (auto&& primary_stream : gpu_streams_.at(ctx.dev_id)) {
+            primary_stream = mshadow::NewStream<gpu>(true, MXNET_USE_CUDNN != 0, ctx.dev_id);
+          }
+          int idx = 0;
+          for (auto&& aux_stream : gpu_aux_streams_.at(ctx.dev_id)) {
+            auto primary_stream = gpu_streams_.at(ctx.dev_id).at(idx++);
+            aux_stream = new GPUAuxStream(primary_stream);
           }
           counter = 0;
         }
         use_counter = counter;
         counter = (counter + 1) % kStreams;
       }
-      ret = RunContext{ctx, gpu_streams_.at(ctx.dev_id).at(use_counter)};
+      ret = RunContext{ctx,
+                       gpu_streams_.at(ctx.dev_id).at(use_counter),
+                       gpu_aux_streams_.at(ctx.dev_id).at(use_counter),
+                       false};
       break;
 #else
       LOG(FATAL) << MXNET_GPU_NOT_ENABLED_ERROR;
 #endif  // MXNET_USE_CUDA
+    default:
+      LOG(FATAL) << "Not Reached";
     }
   }
   return ret;
@@ -100,22 +113,24 @@ RunContext StreamManager<kNumGpus, kStreams>::GetIORunContext(
   RunContext ret;
   switch (ctx.dev_mask()) {
     case cpu::kDevMask:
-      ret = RunContext{ctx, nullptr};
+      ret = RunContext{ctx, nullptr, nullptr, false};
       break;
     case gpu::kDevMask: {
 #if MXNET_USE_CUDA
-      CUDA_CALL(cudaSetDevice(ctx.dev_id));
       {
-        std::lock_guard<std::mutex> lock{m_};
+        std::lock_guard<std::mutex> lock{mutex_};
         if (gpu_io_streams_.at(ctx.dev_id) == nullptr) {
-          gpu_io_streams_.at(ctx.dev_id) = mshadow::NewStream<gpu>(false, false);
+          mxnet::common::cuda::DeviceStore device_store(ctx.dev_id);
+          gpu_io_streams_.at(ctx.dev_id) = mshadow::NewStream<gpu>(false, false, ctx.dev_id);
         }
       }
-      ret = RunContext{ctx, gpu_io_streams_.at(ctx.dev_id)};
+      ret = RunContext{ctx, gpu_io_streams_.at(ctx.dev_id), nullptr, false};
       break;
 #else
       LOG(FATAL) << MXNET_GPU_NOT_ENABLED_ERROR;
 #endif  // MXNET_USE_CUDA
+    default:
+      LOG(FATAL) << "Not Reached";
     }
   }
   return ret;
@@ -138,9 +153,12 @@ void StreamManager<kNumGpus, kStreams>::Finalize() {
 #if MXNET_USE_CUDA
   for (std::size_t i = 0; i < kNumGpus; ++i) {
     if (gpu_cnt_.at(i) != -1) {
-      for (auto&& j : gpu_streams_.at(i)) {
+      for (auto&& primary_stream : gpu_streams_.at(i)) {
         // Catch exception for CUDA driver shutdown
-        MSHADOW_CATCH_ERROR(mshadow::DeleteStream<gpu>(j));
+        MSHADOW_CATCH_ERROR(mshadow::DeleteStream<gpu>(primary_stream));
+      }
+      for (auto&& aux_stream : gpu_aux_streams_.at(i)) {
+        delete aux_stream;
       }
       gpu_cnt_.at(i) = -1;
     }

@@ -18,6 +18,7 @@
  */
 
 /*!
+ * Copyright (c) 2017 by Contributors
  * Copyright (c) 2017 Microsoft
  * Licensed under The Apache-2.0 License [see LICENSE for details]
  * \file psroi_pooling.cu
@@ -267,7 +268,7 @@ namespace op {
 
 template<>
 Operator* CreateOp<gpu>(PSROIPoolingParam param, int dtype) {
-  Operator* op = NULL;
+  Operator* op = nullptr;
   MSHADOW_REAL_TYPE_SWITCH(dtype, DType, {
     op = new PSROIPoolingOp<gpu, DType>(param);
   });

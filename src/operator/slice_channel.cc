@@ -18,6 +18,7 @@
  */
 
 /*!
+ * Copyright (c) 2015 by Contributors
  * \file slice_channel.cc
  * \brief
  * \author Bing Xu
@@ -37,7 +38,7 @@ Operator* CreateOp<cpu>(SliceChannelParam param, int dtype) {
 }
 
 Operator* SliceChannelProp::CreateOperatorEx(Context ctx,
-                                             std::vector<TShape>* in_shape,
+                                             mxnet::ShapeVector* in_shape,
                                              std::vector<int>* in_type) const {
   DO_BIND_DISPATCH(CreateOp, param_, (*in_type)[0]);
 }

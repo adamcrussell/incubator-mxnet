@@ -18,6 +18,7 @@
  */
 
 /*!
+ * Copyright (c) 2016 by Contributors
  * \file multibox_prior.cu
  * \brief generate multibox prior boxes cuda kernels
  * \author Joshua Zhang
@@ -48,7 +49,7 @@ __global__ void AssignPriors(DType *out, const float size,
   int c = index % in_width;
   float center_x = (c + center_offx) * step_x;
   float center_y = (r + center_offy) * step_y;
-  float w = size * sqrt_ratio / 2;  // half width
+  float w = size * in_height / in_width * sqrt_ratio / 2;  // half width
   float h = size / sqrt_ratio / 2;  // half height
   DType *ptr = out + index * stride + 4 * offset;
   *(ptr++) = center_x - w;  // xmin
@@ -82,10 +83,11 @@ inline void MultiBoxPriorForward(const Tensor<gpu, 2, DType> &out,
 
   const int stride = 4 * (num_sizes + num_ratios - 1);
   int offset = 0;
-  // ratio = 1, various sizes
+  // ratio = first ratio, various sizes
+  float ratio = num_ratios > 0? sqrtf(ratios[0]) : 1.f;
   for (int i = 0; i < num_sizes; ++i) {
     cuda::AssignPriors<DType><<<dimGrid, dimBlock, 0, stream>>>(out_ptr,
-      sizes[i], 1.f, in_width, in_height, step_x, step_y, offset_y, offset_x, stride, offset);
+      sizes[i], ratio, in_width, in_height, step_x, step_y, offset_y, offset_x, stride, offset);
     ++offset;
   }
   MULTIBOXPRIOR_CUDA_CHECK(cudaPeekAtLastError());

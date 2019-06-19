@@ -18,6 +18,7 @@
  */
 
 /*!
+ * Copyright (c) 2015 by Contributors
  * \file cuda_utils.h
  * \brief CUDA debugging utilities.
  */
@@ -51,6 +52,125 @@ extern __cuda_fake_struct blockIdx;
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
 #include <curand.h>
+
+/*!
+ * \brief When compiling a __device__ function, check that the architecture is >= Kepler (3.0)
+ *        Note that __CUDA_ARCH__ is not defined outside of a __device__ function
+ */
+#ifdef __CUDACC__
+inline __device__ bool __is_supported_cuda_architecture() {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ < 300
+#error "Fermi and earlier GPU architectures are not supported (architecture versions less than 3.0)"
+  return false;
+#else
+  return true;
+#endif  // __CUDA_ARCH__ < 300
+}
+#endif  // __CUDACC__
+
+/*!
+ * \brief Check CUDA error.
+ * \param msg Message to print if an error occured.
+ */
+#define CHECK_CUDA_ERROR(msg)                                                \
+  {                                                                          \
+    cudaError_t e = cudaGetLastError();                                      \
+    CHECK_EQ(e, cudaSuccess) << (msg) << " CUDA: " << cudaGetErrorString(e); \
+  }
+
+/*!
+ * \brief Protected CUDA call.
+ * \param func Expression to call.
+ *
+ * It checks for CUDA errors after invocation of the expression.
+ */
+#define CUDA_CALL(func)                                            \
+  {                                                                \
+    cudaError_t e = (func);                                        \
+    CHECK(e == cudaSuccess || e == cudaErrorCudartUnloading)       \
+        << "CUDA: " << cudaGetErrorString(e);                      \
+  }
+
+/*!
+ * \brief Protected cuBLAS call.
+ * \param func Expression to call.
+ *
+ * It checks for cuBLAS errors after invocation of the expression.
+ */
+#define CUBLAS_CALL(func)                                       \
+  {                                                             \
+    cublasStatus_t e = (func);                                  \
+    CHECK_EQ(e, CUBLAS_STATUS_SUCCESS)                          \
+        << "cuBLAS: " << mxnet::common::cuda::CublasGetErrorString(e); \
+  }
+
+/*!
+ * \brief Protected cuSolver call.
+ * \param func Expression to call.
+ *
+ * It checks for cuSolver errors after invocation of the expression.
+ */
+#define CUSOLVER_CALL(func)                                         \
+  {                                                                 \
+    cusolverStatus_t e = (func);                                    \
+    CHECK_EQ(e, CUSOLVER_STATUS_SUCCESS)                            \
+        << "cuSolver: " << mxnet::common::cuda::CusolverGetErrorString(e); \
+  }
+
+/*!
+ * \brief Protected cuRAND call.
+ * \param func Expression to call.
+ *
+ * It checks for cuRAND errors after invocation of the expression.
+ */
+#define CURAND_CALL(func)                                       \
+  {                                                             \
+    curandStatus_t e = (func);                                  \
+    CHECK_EQ(e, CURAND_STATUS_SUCCESS)                          \
+        << "cuRAND: " << mxnet::common::cuda::CurandGetErrorString(e); \
+  }
+
+/*!
+ * \brief Protected NVRTC call.
+ * \param func Expression to call.
+ *
+ * It checks for NVRTC errors after invocation of the expression.
+ */
+#define NVRTC_CALL(x)                                   \
+  {                                                     \
+    nvrtcResult result = x;                             \
+    CHECK_EQ(result, NVRTC_SUCCESS)                     \
+      << #x " failed with error "                       \
+      << nvrtcGetErrorString(result);                   \
+  }
+
+/*!
+ * \brief Protected CUDA driver call.
+ * \param func Expression to call.
+ *
+ * It checks for CUDA driver errors after invocation of the expression.
+ */
+#define CUDA_DRIVER_CALL(func)                                          \
+  {                                                                     \
+    CUresult e = (func);                                                \
+    if (e != CUDA_SUCCESS) {                                            \
+      char const * err_msg = nullptr;                                         \
+      if (cuGetErrorString(e, &err_msg) == CUDA_ERROR_INVALID_VALUE) {  \
+        LOG(FATAL) << "CUDA Driver: Unknown error " << e;               \
+      } else {                                                          \
+        LOG(FATAL) << "CUDA Driver: " << err_msg;                       \
+      }                                                                 \
+    }                                                                   \
+  }
+
+
+#if !defined(_MSC_VER)
+#define CUDA_UNROLL _Pragma("unroll")
+#define CUDA_NOUNROLL _Pragma("nounroll")
+#else
+#define CUDA_UNROLL
+#define CUDA_NOUNROLL
+#endif
 
 namespace mxnet {
 namespace common {
@@ -163,79 +283,44 @@ inline DType __device__ CudaMin(DType a, DType b) {
     return a < b ? a : b;
 }
 
+class DeviceStore {
+ public:
+  /*! \brief default constructor- only optionally restores previous device */
+  explicit DeviceStore(int requested_device = -1, bool restore = true) :
+    restore_device_(-1),
+    current_device_(requested_device),
+    restore_(restore) {
+    if (restore_)
+      CUDA_CALL(cudaGetDevice(&restore_device_));
+    if (requested_device != restore_device_) {
+      SetDevice(requested_device);
+    }
+  }
+
+  ~DeviceStore() {
+    if (restore_ &&
+        current_device_ != restore_device_ &&
+        current_device_ != -1 &&
+        restore_device_ != -1)
+      CUDA_CALL(cudaSetDevice(restore_device_));
+  }
+
+  void SetDevice(int device) {
+    if (device != -1) {
+      CUDA_CALL(cudaSetDevice(device));
+      current_device_ = device;
+    }
+  }
+
+ private:
+  int restore_device_;
+  int current_device_;
+  bool restore_;
+};
+
 }  // namespace cuda
 }  // namespace common
 }  // namespace mxnet
-
-/*!
- * \brief Check CUDA error.
- * \param msg Message to print if an error occured.
- */
-#define CHECK_CUDA_ERROR(msg)                                                \
-  {                                                                          \
-    cudaError_t e = cudaGetLastError();                                      \
-    CHECK_EQ(e, cudaSuccess) << (msg) << " CUDA: " << cudaGetErrorString(e); \
-  }
-
-/*!
- * \brief Protected CUDA call.
- * \param func Expression to call.
- *
- * It checks for CUDA errors after invocation of the expression.
- */
-#define CUDA_CALL(func)                                            \
-  {                                                                \
-    cudaError_t e = (func);                                        \
-    CHECK(e == cudaSuccess || e == cudaErrorCudartUnloading)       \
-        << "CUDA: " << cudaGetErrorString(e);                      \
-  }
-
-/*!
- * \brief Protected cuBLAS call.
- * \param func Expression to call.
- *
- * It checks for cuBLAS errors after invocation of the expression.
- */
-#define CUBLAS_CALL(func)                                       \
-  {                                                             \
-    cublasStatus_t e = (func);                                  \
-    CHECK_EQ(e, CUBLAS_STATUS_SUCCESS)                          \
-        << "cuBLAS: " << mxnet::common::cuda::CublasGetErrorString(e); \
-  }
-
-/*!
- * \brief Protected cuSolver call.
- * \param func Expression to call.
- *
- * It checks for cuSolver errors after invocation of the expression.
- */
-#define CUSOLVER_CALL(func)                                         \
-  {                                                                 \
-    cusolverStatus_t e = (func);                                    \
-    CHECK_EQ(e, CUSOLVER_STATUS_SUCCESS)                            \
-        << "cuSolver: " << mxnet::common::cuda::CusolverGetErrorString(e); \
-  }
-
-/*!
- * \brief Protected cuRAND call.
- * \param func Expression to call.
- *
- * It checks for cuRAND errors after invocation of the expression.
- */
-#define CURAND_CALL(func)                                       \
-  {                                                             \
-    curandStatus_t e = (func);                                  \
-    CHECK_EQ(e, CURAND_STATUS_SUCCESS)                          \
-        << "cuRAND: " << mxnet::common::cuda::CurandGetErrorString(e); \
-  }
-
-#if !defined(_MSC_VER)
-#define CUDA_UNROLL _Pragma("unroll")
-#define CUDA_NOUNROLL _Pragma("nounroll")
-#else
-#define CUDA_UNROLL
-#define CUDA_NOUNROLL
-#endif
 
 /*!
  * \brief Determine major version number of the gpu's cuda compute architecture.
@@ -274,26 +359,31 @@ inline int SMArch(int device_id) {
 
 /*!
  * \brief Determine whether a cuda-capable gpu's architecture supports float16 math.
+ *        Assume not if device_id is negative.
  * \param device_id The device index of the cuda-capable gpu of interest.
  * \return whether the gpu's architecture supports float16 math.
  */
 inline bool SupportsFloat16Compute(int device_id) {
-  // Kepler and most Maxwell GPUs do not support fp16 compute
-  int computeCapabilityMajor = ComputeCapabilityMajor(device_id);
-  int computeCapabilityMinor = ComputeCapabilityMinor(device_id);
-  return (computeCapabilityMajor > 5) ||
-      (computeCapabilityMajor == 5 && computeCapabilityMinor >= 3);
+  if (device_id < 0) {
+    return false;
+  } else {
+    // Kepler and most Maxwell GPUs do not support fp16 compute
+    int computeCapabilityMajor = ComputeCapabilityMajor(device_id);
+    return (computeCapabilityMajor > 5) ||
+           (computeCapabilityMajor == 5 && ComputeCapabilityMinor(device_id) >= 3);
+  }
 }
 
 /*!
  * \brief Determine whether a cuda-capable gpu's architecture supports Tensor Core math.
+ *        Assume not if device_id is negative.
  * \param device_id The device index of the cuda-capable gpu of interest.
  * \return whether the gpu's architecture supports Tensor Core math.
  */
 inline bool SupportsTensorCore(int device_id) {
   // Volta (sm_70) supports TensorCore algos
-  int computeCapabilityMajor = ComputeCapabilityMajor(device_id);
-  return (computeCapabilityMajor >= 7);
+  return device_id >= 0 &&
+         ComputeCapabilityMajor(device_id) >=7;
 }
 
 // The policy if the user hasn't set the environment variable MXNET_CUDA_ALLOW_TENSOR_CORE
@@ -317,6 +407,22 @@ inline bool GetEnvAllowTensorCore() {
     is_set = true;
   }
   return allow_tensor_core;
+}
+
+// The policy if the user hasn't set the environment variable
+// CUDNN_TENSOR_OP_MATH_ALLOW_CONVERSION
+#define MXNET_CUDA_TENSOR_OP_MATH_ALLOW_CONVERSION_DEFAULT false
+
+/*!
+ * \brief Returns global policy for TensorCore implicit type casting
+ */
+inline bool GetEnvAllowTensorCoreConversion() {
+  // Use of optional<bool> here permits: "0", "1", "true" and "false" to all be
+  // legal.
+  bool default_value = MXNET_CUDA_TENSOR_OP_MATH_ALLOW_CONVERSION_DEFAULT;
+  return dmlc::GetEnv("MXNET_CUDA_TENSOR_OP_MATH_ALLOW_CONVERSION",
+                      dmlc::optional<bool>(default_value))
+      .value();
 }
 
 #if CUDA_VERSION >= 9000
@@ -437,6 +543,41 @@ static inline __device__ void atomicAdd(mshadow::half::half_t *address,
               : (old & 0xffff0000) | hsum.half_;
     old = atomicCAS(address_as_ui, assumed, old);
   } while (assumed != old);
+}
+
+static inline __device__ void atomicAdd(uint8_t *address, uint8_t val) {
+  unsigned int * address_as_ui = (unsigned int *) (address - ((size_t)address & 0x3));
+  unsigned int old = *address_as_ui;
+  unsigned int shift = (((size_t)address & 0x3) << 3);
+  unsigned int sum;
+  unsigned int assumed;
+
+  do {
+    assumed = old;
+    sum = val + static_cast<uint8_t>((old >> shift) & 0xff);
+    old = (old & ~(0x000000ff << shift)) | (sum << shift);
+    old = atomicCAS(address_as_ui, assumed, old);
+  } while (assumed != old);
+}
+
+static inline __device__ void atomicAdd(int8_t *address, int8_t val) {
+  unsigned int * address_as_ui = (unsigned int *) (address - ((size_t)address & 0x3));
+  unsigned int old = *address_as_ui;
+  unsigned int shift = (((size_t)address & 0x3) << 3);
+  unsigned int sum;
+  unsigned int assumed;
+
+  do {
+    assumed = old;
+    sum = val + static_cast<int8_t>((old >> shift) & 0xff);
+    old = (old & ~(0x000000ff << shift)) | (sum << shift);
+    old = atomicCAS(address_as_ui, assumed, old);
+  } while (assumed != old);
+}
+
+// Overload atomicAdd to work for signed int64 on all architectures
+static inline  __device__  void atomicAdd(int64_t *address, int64_t val) {
+  atomicAdd(reinterpret_cast<unsigned long long*>(address), static_cast<unsigned long long>(val)); // NOLINT
 }
 
 template <typename DType>

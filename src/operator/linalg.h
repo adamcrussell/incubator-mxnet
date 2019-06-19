@@ -64,6 +64,13 @@ void linalg_batch_gemm(const Tensor<xpu, 3, DType>& A, const Tensor<xpu, 3, DTyp
                        const Tensor<xpu, 3, DType>& C, DType alpha, DType beta,
                        bool tA, bool tB, Stream<xpu> *s = 0);
 
+// Version of batch gemmm where rows are indexed at axis 1 and columns at axis 3.
+template<typename xpu, typename DType>
+void linalg_batch_gemm(const Tensor<xpu, 4, DType>& A, const Tensor<xpu, 4, DType>& B,
+                       const Tensor<xpu, 4, DType>& C, DType alpha, DType beta,
+                       bool tA, bool tB, Stream<xpu> *s = 0);
+
+
 template<typename xpu, typename DType>
 inline void linalg_gemm(const Tensor<xpu, 2, DType>& A,
                         const Tensor<xpu, 2, DType>& B,
@@ -122,6 +129,116 @@ void linalg_potri(const Tensor<xpu, 2, DType>& A, bool lower, Stream<xpu> *s = 0
 
 template<typename xpu, typename DType>
 void linalg_batch_potri(const Tensor<xpu, 3, DType>& A, bool lower, Stream<xpu> *s = 0);
+
+//////////////////////////////// SYRK ////////////////////////////////////////////
+
+// CPU/GPU-versions of BLAS3 function "syrk". Please refer to the BLAS3-documentation
+// for further information about the function and its parameters.
+// Note that this is B = syrk(A, B), so that B is input and output parameter.
+
+template<typename xpu, typename DType>
+void linalg_syrk(const Tensor<xpu, 2, DType>& A, const Tensor<xpu, 2, DType>& B,
+                 DType alpha, DType beta, bool tA, Stream<xpu> *s = 0);
+
+template<typename xpu, typename DType>
+void linalg_batch_syrk(const Tensor<xpu, 3, DType>& A,
+                       const Tensor<xpu, 3, DType>& B, DType alpha, DType beta,
+                       bool tA, Stream<xpu> *s = 0);
+
+//////////////////////////////// GELQF ////////////////////////////////////////////
+
+// CPU/GPU-versions of LAPACK functions "gelqf", "orglq". Please refer to the
+// LAPACK documentation for further details.
+// Note:
+// - Both functions have A as input and output parameter
+// - Both functions require extra workspace, passed as 1D tensor
+// - We call orglq after gelqf. Apart from A, they also communicate via the
+//   first part of the workspace.
+
+template<typename xpu, typename DType>
+void linalg_gelqf(const Tensor<xpu, 2, DType>& A,
+                  const Tensor<xpu, 1, DType>& work, Stream<xpu> *s = 0);
+
+template<typename xpu, typename DType>
+void linalg_orglq(const Tensor<xpu, 2, DType>& A,
+                  const Tensor<xpu, 1, DType>& work, Stream<xpu> *s = 0);
+
+// This function determines the amount of workspace needed for linalg_gelqf,
+// linalg_orglq. The workspace can be used for both. The first m entries are
+// used to communicate information from gelqf to orglq.
+template<typename xpu, typename DType>
+int linalg_gelqf_workspace_query(const Tensor<xpu, 2, DType>& A,
+                                 Stream<xpu> *s = 0);
+
+//////////////////////////////// SYEVD ////////////////////////////////////////////
+
+// CPU/GPU-versions of LAPACK function "syevd". Please refer to the
+// LAPACK documentation for further details.
+// Note:
+// - A is input and output parameter (overwritten by U)
+// - Input A is symmetric, we access the lower triangle only
+
+template<typename xpu, typename DType>
+void linalg_syevd(const Tensor<xpu, 2, DType>& A,
+                  const Tensor<xpu, 1, DType>& L,
+                  const Tensor<xpu, 1, DType>& work,
+                  Stream<xpu> *s = 0);
+
+// This function determines the amount of workspace needed for linalg_syevd
+// which is returned as number of elements of type DType.
+template<typename xpu, typename DType>
+int linalg_syevd_workspace_query(const Tensor<xpu, 2, DType>& A,
+                                 const Tensor<xpu, 1, DType>& L,
+                                 Stream<xpu> *s = 0);
+
+//////////////////////////////// GETRF ////////////////////////////////////////////
+
+// CPU/GPU-versions of LAPACK function "getrf". Please refer to the
+// LAPACK documentation for further details.
+// Note that this is A = getrf(A), so A is input and output parameter.
+
+template<typename xpu, typename DType>
+void linalg_getrf(const Tensor<xpu, 2, DType>& A,
+                  const Tensor<xpu, 1, DType>& work,
+                  Stream<xpu> *s = 0);
+
+template<typename xpu, typename DType>
+void linalg_batch_getrf(const Tensor<xpu, 3, DType>& A,
+                        const Tensor<xpu, 1, DType>& work,
+                        Stream<xpu> *s = 0);
+
+//////////////////////////////// GETRI ////////////////////////////////////////////
+
+// CPU/GPU-versions of LAPACK function "getri". Please refer to the
+// LAPACK documentation for further details.
+// Note that this is A = getri(A), so A is input and output parameter.
+
+template<typename xpu, typename DType>
+void linalg_getri(const Tensor<xpu, 2, DType>& A,
+                  const Tensor<xpu, 1, DType>& work,
+                  Stream<xpu> *s = 0);
+
+template<typename xpu, typename DType>
+void linalg_batch_getri(const Tensor<xpu, 3, DType>& A,
+                        const Tensor<xpu, 3, DType>& B,
+                        const Tensor<xpu, 1, DType>& work,
+                        Stream<xpu> *s = 0);
+
+// This function determines the amount of workspace needed for linalg_getri to operate
+// on a batch of matrices which is returned as number of elements of type DType.
+template<typename xpu, typename DType>
+int linalg_getri_workspace_query(const Tensor<xpu, 3, DType>& A,
+                                 Stream<xpu> *s = 0);
+
+//////////////////////////////// INVERSE ////////////////////////////////////////////
+
+// CPU/GPU-versions of matrix inversion combining LAPACK function "getrf" and "getri"
+// Note that A = inverse(B)
+template<typename xpu, typename DType>
+void linalg_batch_inverse(const Tensor<xpu, 3, DType>& A,
+                          const Tensor<xpu, 3, DType>& B,
+                          const Tensor<xpu, 1, DType>& work,
+                          Stream<xpu> *s = 0);
 
 #include "linalg_impl.h"
 

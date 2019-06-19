@@ -18,6 +18,7 @@
  */
 
 /*!
+ * Copyright (c) 2015 by Contributors
  */
 #ifndef MXNET_COMMON_OBJECT_POOL_H_
 #define MXNET_COMMON_OBJECT_POOL_H_
@@ -131,10 +132,9 @@ struct ObjectPoolAllocatable {
 
 template <typename T>
 ObjectPool<T>::~ObjectPool() {
-  // TODO(hotpxl): mind destruction order
-  // for (auto i : allocated_) {
-  //   free(i);
-  // }
+  for (auto i : allocated_) {
+    free(i);
+  }
 }
 
 template <typename T>

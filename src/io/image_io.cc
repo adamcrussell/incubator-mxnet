@@ -18,6 +18,7 @@
  */
 
 /*!
+ *  Copyright (c) 2016 by Contributors
  * \file optimizer_op-inl.h
  * \brief Optimizer operators
  * \author Junyuan Xie
@@ -31,14 +32,16 @@
 #include <mshadow/base.h>
 #include <nnvm/op.h>
 #include <nnvm/op_attr_types.h>
-#include <nnvm/tuple.h>
 
 #include <fstream>
+#include <cstring>
 
 #include "../operator/elemwise_op_common.h"
+#include "../operator/image/resize-inl.h"
 
 #if MXNET_USE_OPENCV
   #include <opencv2/opencv.hpp>
+  #include "./opencv_compatibility.h"
 #endif  // MXNET_USE_OPENCV
 
 namespace mxnet {
@@ -141,28 +144,30 @@ void ImdecodeImpl(int flag, bool to_rgb, void* data, size_t size,
   cv::Mat dst;
   if (out->is_none()) {
     cv::Mat res = cv::imdecode(buf, flag);
-    if (res.empty()) {
-      LOG(INFO) << "Invalid image file. Only supports png and jpg.";
-      *out = NDArray();
-      return;
-    }
+    CHECK(!res.empty()) << "Decoding failed. Invalid image file.";
+
     *out = NDArray(mshadow::Shape3(res.rows, res.cols, flag == 0 ? 1 : 3),
                    Context::CPU(), false, mshadow::kUint8);
     dst = cv::Mat(out->shape()[0], out->shape()[1], flag == 0 ? CV_8U : CV_8UC3,
                   out->data().dptr_);
     res.copyTo(dst);
+    CHECK(!dst.empty()) << "Failed copying buffer to output.";
   } else {
     dst = cv::Mat(out->shape()[0], out->shape()[1], flag == 0 ? CV_8U : CV_8UC3,
                 out->data().dptr_);
-#if (CV_MAJOR_VERSION > 2 || (CV_MAJOR_VERSION == 2 && CV_MINOR_VERSION >=4))
+#if (CV_MAJOR_VERSION > 3 || (CV_MAJOR_VERSION == 3 && CV_MINOR_VERSION >= 3))
+    cv::imdecode(buf, flag | cv::IMREAD_IGNORE_ORIENTATION, &dst);
+    CHECK(!dst.empty()) << "Decoding failed. Invalid image file.";
+#elif(CV_MAJOR_VERSION > 2 || (CV_MAJOR_VERSION == 2 && CV_MINOR_VERSION >= 4))
     cv::imdecode(buf, flag, &dst);
+    CHECK(!dst.empty()) << "Decoding failed. Invalid image file.";
 #else
     cv::Mat tmp = cv::imdecode(buf, flag);
-    CHECK(!tmp.empty());
+    CHECK(!tmp.empty()) << "Decoding failed. Invalid image file.";
     tmp.copyTo(dst);
+    CHECK(!dst.empty()) << "Failed copying buffer to output.";
 #endif
   }
-  CHECK(!dst.empty());
   CHECK_EQ(static_cast<void*>(dst.ptr()), out->data().dptr_);
   if (to_rgb && flag != 0) {
     cv::cvtColor(dst, dst, CV_BGR2RGB);
@@ -176,13 +181,15 @@ void Imdecode(const nnvm::NodeAttrs& attrs,
 #if MXNET_USE_OPENCV
   const auto& param = nnvm::get<ImdecodeParam>(attrs.parsed);
 
-  CHECK_EQ(inputs[0].ctx().dev_mask(), cpu::kDevMask) << "Only supports cpu input";
+  CHECK_EQ(inputs[0].ctx().dev_mask(), Context::kCPU) << "Only supports cpu input";
   CHECK_EQ(inputs[0].dtype(), mshadow::kUint8) << "Input needs to be uint8 buffer";
   inputs[0].WaitToRead();
 
   uint8_t* str_img = inputs[0].data().dptr<uint8_t>();
   size_t len = inputs[0].shape().Size();
-  TShape oshape(3);
+  CHECK(len > 0) << "Input cannot be an empty buffer";
+
+  mxnet::TShape oshape(3, 1);
   oshape[2] = param.flag == 0 ? 1 : 3;
   if (get_jpeg_size(str_img, len, &oshape[1], &oshape[0])) {
   } else if (get_png_size(str_img, len, &oshape[1], &oshape[0])) {
@@ -199,7 +206,7 @@ void Imdecode(const nnvm::NodeAttrs& attrs,
       ImdecodeImpl(param.flag, param.to_rgb, str_img, len,
                    const_cast<NDArray*>(&ndout));
     }, ndout.ctx(), {ndin.var()}, {ndout.var()},
-    FnProperty::kNormal, 0, PROFILER_MESSAGE("Imdecode"));
+    FnProperty::kNormal, 0, "Imdecode");
 #else
   LOG(FATAL) << "Build with USE_OPENCV=1 for image io.";
 #endif  // MXNET_USE_OPENCV
@@ -212,31 +219,33 @@ void Imread(const nnvm::NodeAttrs& attrs,
   const auto& param = nnvm::get<ImreadParam>(attrs.parsed);
 
   std::ifstream file(param.filename, std::ios::binary | std::ios::ate);
+  // if file is not open we get bad alloc after tellg
+  CHECK(file.is_open()) << "Imread: '" << param.filename
+      << "' couldn't open file: " << strerror(errno);
   size_t fsize = file.tellg();
   file.seekg(0, std::ios::beg);
-  auto buff = new uint8_t[fsize];
-  file.read(reinterpret_cast<char*>(buff), fsize);
-  CHECK(file.good()) << "Failed reading image file " << param.filename;
+  std::shared_ptr<uint8_t> buff(new uint8_t[fsize], std::default_delete<uint8_t[]>());
+  file.read(reinterpret_cast<char*>(buff.get()), fsize);
+  CHECK(file.good()) << "Failed reading image file: '" << param.filename << "' "
+            << strerror(errno);
 
-  TShape oshape(3);
+  mxnet::TShape oshape(3, 1);
   oshape[2] = param.flag == 0 ? 1 : 3;
-  if (get_jpeg_size(buff, fsize, &oshape[1], &oshape[0])) {
-  } else if (get_png_size(buff, fsize, &oshape[1], &oshape[0])) {
+  if (get_jpeg_size(buff.get(), fsize, &oshape[1], &oshape[0])) {
+  } else if (get_png_size(buff.get(), fsize, &oshape[1], &oshape[0])) {
   } else {
     (*outputs)[0] = NDArray();
-    ImdecodeImpl(param.flag, param.to_rgb, buff, fsize, &((*outputs)[0]));
-    delete buff;
+    ImdecodeImpl(param.flag, param.to_rgb, buff.get(), fsize, &((*outputs)[0]));
     return;
   }
 
   NDArray& ndout = (*outputs)[0];
   ndout = NDArray(oshape, Context::CPU(), true, mshadow::kUint8);
   Engine::Get()->PushSync([ndout, buff, fsize, param](RunContext ctx){
-      ImdecodeImpl(param.flag, param.to_rgb, buff, fsize,
+      ImdecodeImpl(param.flag, param.to_rgb, buff.get(), fsize,
                    const_cast<NDArray*>(&ndout));
-      delete buff;
     }, ndout.ctx(), {}, {ndout.var()},
-    FnProperty::kNormal, 0, PROFILER_MESSAGE("Imread"));
+    FnProperty::kNormal, 0, "Imread");
 #else
   LOG(FATAL) << "Build with USE_OPENCV=1 for image io.";
 #endif  // MXNET_USE_OPENCV
@@ -262,8 +271,8 @@ struct ResizeParam : public dmlc::Parameter<ResizeParam> {
 DMLC_REGISTER_PARAMETER(ResizeParam);
 
 inline bool ResizeShape(const nnvm::NodeAttrs& attrs,
-                        std::vector<TShape> *ishape,
-                        std::vector<TShape> *oshape) {
+                        mxnet::ShapeVector *ishape,
+                        mxnet::ShapeVector *oshape) {
   const auto& param = nnvm::get<ResizeParam>(attrs.parsed);
   if (ishape->size() != 1 || (*ishape)[0].ndim() != 3) return false;
 
@@ -277,19 +286,8 @@ inline void Imresize(const nnvm::NodeAttrs& attrs,
                      const std::vector<TBlob> &inputs,
                      const std::vector<OpReqType> &req,
                      const std::vector<TBlob> &outputs) {
-#if MXNET_USE_OPENCV
-  CHECK_NE(inputs[0].type_flag_, mshadow::kFloat16) << "imresize doesn't support fp16";
-  const int DTYPE[] = {CV_32F, CV_64F, -1, CV_8U, CV_32S};
-  int cv_type = CV_MAKETYPE(DTYPE[inputs[0].type_flag_], inputs[0].shape_[2]);
   const auto& param = nnvm::get<ResizeParam>(attrs.parsed);
-  cv::Mat buf(inputs[0].shape_[0], inputs[0].shape_[1], cv_type, inputs[0].dptr_);
-  cv::Mat dst(outputs[0].shape_[0], outputs[0].shape_[1], cv_type, outputs[0].dptr_);
-  cv::resize(buf, dst, cv::Size(param.w, param.h), 0, 0, param.interp);
-  CHECK(!dst.empty());
-  CHECK_EQ(static_cast<void*>(dst.ptr()), outputs[0].dptr_);
-#else
-  LOG(FATAL) << "Build with USE_OPENCV=1 for image io.";
-#endif  // MXNET_USE_OPENCV
+  op::image::ResizeImpl(inputs, outputs, param.h, param.w, param.interp);
 }
 
 
@@ -297,7 +295,7 @@ struct MakeBorderParam : public dmlc::Parameter<MakeBorderParam> {
   int top, bot, left, right;
   int type;
   double value;
-  nnvm::Tuple<double> values;
+  mxnet::Tuple<double> values;
   DMLC_DECLARE_PARAMETER(MakeBorderParam) {
     DMLC_DECLARE_FIELD(top)
     .describe("Top margin.");
@@ -321,8 +319,8 @@ struct MakeBorderParam : public dmlc::Parameter<MakeBorderParam> {
 DMLC_REGISTER_PARAMETER(MakeBorderParam);
 
 inline bool MakeBorderShape(const nnvm::NodeAttrs& attrs,
-                        std::vector<TShape> *ishape,
-                        std::vector<TShape> *oshape) {
+                        mxnet::ShapeVector *ishape,
+                        mxnet::ShapeVector *oshape) {
   const auto& param = nnvm::get<MakeBorderParam>(attrs.parsed);
   if (ishape->size() != 1 || (*ishape)[0].ndim() != 3) return false;
 
@@ -384,7 +382,7 @@ NNVM_REGISTER_OP(_cvimresize)
 .set_num_inputs(1)
 .set_num_outputs(1)
 .set_attr_parser(op::ParamParser<ResizeParam>)
-.set_attr<nnvm::FInferShape>("FInferShape", ResizeShape)
+.set_attr<mxnet::FInferShape>("FInferShape", ResizeShape)
 .set_attr<nnvm::FInferType>("FInferType", op::ElemwiseType<1, 1>)
 .set_attr<FCompute>("FCompute<cpu>", Imresize)
 .add_argument("src", "NDArray", "source image")
@@ -395,7 +393,7 @@ NNVM_REGISTER_OP(_cvcopyMakeBorder)
 .set_num_inputs(1)
 .set_num_outputs(1)
 .set_attr_parser(op::ParamParser<MakeBorderParam>)
-.set_attr<nnvm::FInferShape>("FInferShape", MakeBorderShape)
+.set_attr<mxnet::FInferShape>("FInferShape", MakeBorderShape)
 .set_attr<nnvm::FInferType>("FInferType", op::ElemwiseType<1, 1>)
 .set_attr<FCompute>("FCompute<cpu>", copyMakeBorder)
 .add_argument("src", "NDArray", "source image")

@@ -18,6 +18,7 @@
  */
 
 /*!
+ * Copyright (c) 2015 by Contributors
  * \file count_sketch.cc
  * \brief count_sketch op
  * \author Chen Zhu
@@ -29,11 +30,11 @@ namespace op {
 template<>
 Operator *CreateOp<cpu>(CountSketchParam param, int dtype) {
     LOG(FATAL) << "CountSketch is only available for GPU.";
-    return NULL;
+    return nullptr;
 }
-Operator *CountSketchProp::CreateOperatorEx(Context ctx, std::vector<TShape> *in_shape,
+Operator *CountSketchProp::CreateOperatorEx(Context ctx, mxnet::ShapeVector *in_shape,
                                             std::vector<int> *in_type) const {
-    std::vector<TShape> out_shape, aux_shape;
+    mxnet::ShapeVector out_shape, aux_shape;
     std::vector<int> out_type, aux_type;
     CHECK(InferType(in_type, &out_type, &aux_type));
     CHECK(InferShape(in_shape, &out_shape, &aux_shape));
@@ -55,12 +56,13 @@ Then the operator computs:
    out[h[i]] += data[i] * s[i]
 
 Example::
+
    out_dim = 5
    x = [[1.2, 2.5, 3.4],[3.2, 5.7, 6.6]]
-   h = [0, 3, 4]
-   s = [1, -1, 1]
+   h = [[0, 3, 4]]
+   s = [[1, -1, 1]]
    mx.contrib.ndarray.count_sketch(data=x, h=h, s=s, out_dim = 5) = [[1.2, 0, 0, -2.5, 3.4],
-                                                                    [3.2, 0, 0, -5.7, 6.6]]
+                                                                     [3.2, 0, 0, -5.7, 6.6]]
 
 )code" ADD_FILELINE)
 .add_argument("data", "NDArray-or-Symbol", "Input data to the CountSketchOp.")

@@ -18,6 +18,7 @@
  */
 
 /*!
+ * Copyright (c) 2015 by Contributors
  * \file loss_binary_op.cc
  * \brief loss function that takes a data and label
 */
@@ -58,7 +59,7 @@ Example::
 )code" ADD_FILELINE)
 .set_num_inputs(2)
 .set_num_outputs(1)
-.set_attr<nnvm::FInferShape>("FInferShape", SoftmaxCrossEntropyShape)
+.set_attr<mxnet::FInferShape>("FInferShape", SoftmaxCrossEntropyShape)
 .set_attr<nnvm::FInferType>("FInferType", ElemwiseType<2, 1>)
 .set_attr<FResourceRequest>("FResourceRequest",
   [](const NodeAttrs& attrs) {
@@ -66,6 +67,10 @@ Example::
   })
 .set_attr<FCompute>("FCompute<cpu>", SoftmaxCrossEntropyForward<cpu>)
 .set_attr<nnvm::FGradient>("FGradient", ElemwiseGradUseIn{"_backward_softmax_cross_entropy"})
+.set_attr<nnvm::FListInputNames>("FListInputNames",
+  [](const NodeAttrs& attrs) {
+    return std::vector<std::string>{"data", "label"};
+})
 .add_argument("data", "NDArray-or-Symbol", "Input data")
 .add_argument("label", "NDArray-or-Symbol", "Input label");
 

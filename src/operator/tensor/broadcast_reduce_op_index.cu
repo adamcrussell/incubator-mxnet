@@ -18,8 +18,9 @@
  */
 
 /*!
- * \file broadcast_reduce_op.cu
- * \brief GPU Implementation of broadcast and reduce functions.
+ *  Copyright (c) 2016 by Contributors
+ * \file broadcast_reduce_op_index.cu
+ * \brief GPU Implementation of broadcast and reduce functions based on index.
  */
 #include "./broadcast_reduce_op.h"
 

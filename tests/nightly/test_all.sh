@@ -72,10 +72,24 @@ check_val() {
 example_dir=../../example/image-classification
 # python: lenet + mnist
 test_lenet() {
-    python $example_dir/train_mnist.py \
-        --data-dir `pwd`/data/mnist/ --network lenet --gpus $gpus --num-epochs 10 \
-        2>&1 | tee log
-    check_val 0.99
+    optimizers="adam sgd adagrad"
+    for optimizer in ${optimizers}; do
+        echo "OPTIMIZER: $optimizer"
+        if [ "$optimizer" == "adam" ]; then
+            learning_rate=0.0005
+            desired_accuracy=0.98
+        else
+            learning_rate=0.01
+            desired_accuracy=0.99
+        fi
+        python $example_dir/train_mnist.py --lr $learning_rate \
+            --network lenet --optimizer $optimizer --gpus $gpus \
+            --num-epochs 10 2>&1 | tee log
+       if [ $? -ne 0 ]; then
+           return $?
+       fi
+       check_val $desired_accuracy
+    done
 }
 juLog -name=Python.Lenet.Mnist -error=Fail test_lenet
 
@@ -107,5 +121,8 @@ juLog -name=BuildWithoutCUDNN -error=Error build
 
 # python: multi gpus lenet + mnist
 juLog -name=Python.Multi.Lenet.Mnist -error=Error python multi_lenet.py
+
+# python: large tensor
+juLog -name=Python.LargeTensor -error=Fail python test_large_array.py
 
 exit $errors

@@ -18,6 +18,7 @@
  */
 
 /*!
+ * Copyright (c) 2015 by Contributors
  * \file engine.cc
  * \brief Implementation of engine.
  */
@@ -47,7 +48,7 @@ inline Engine* CreateEngine() {
   ret = CreateNaiveEngine();
   #endif
 
-  if (ret ==nullptr) {
+  if (ret == nullptr) {
     LOG(FATAL) << "Cannot find Engine " << type;
   }
   if (!default_engine) {

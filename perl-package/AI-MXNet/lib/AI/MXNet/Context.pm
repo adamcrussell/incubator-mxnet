@@ -19,6 +19,7 @@ package AI::MXNet::Context;
 use strict;
 use warnings;
 use Mouse;
+use AI::MXNet::Base;
 use AI::MXNet::Types;
 use AI::MXNet::Function::Parameters;
 use constant devtype2str => { 1 => 'cpu', 2 => 'gpu', 3 => 'cpu_pinned' };
@@ -65,7 +66,8 @@ use overload
     '""' => sub {
         my ($self) = @_;
         return sprintf("%s(%s)", $self->device_type, $self->device_id);
-    };
+    },
+    fallback => 1;
 =head1 NAME
 
     AI::MXNet::Context - A device context.
@@ -74,6 +76,13 @@ use overload
 =head1 DESCRIPTION
 
     This class governs the device context of AI::MXNet::NDArray objects.
+=cut
+
+=head1 SYNOPSIS
+
+    use AI::MXNet qw(mx);
+    print nd->array([[1,2],[3,4]], ctx => mx->cpu)->aspdl;
+    my $arr_gpu = nd->random->uniform(shape => [10, 10], ctx => mx->gpu(0));
 =cut
 
 =head2
@@ -110,6 +119,28 @@ method cpu(Int $device_id=0)
     return $self->new(device_type => 'cpu', device_id => $device_id);
 }
 
+=head2 cpu_pinned
+
+    Returns a CPU pinned memory context. Copying from CPU pinned memory to GPU
+    is faster than from normal CPU memory.
+
+    Parameters
+    ----------
+    device_id : int, optional
+        The device id of the device. `device_id` is not needed for CPU.
+        This is included to make interface compatible with GPU.
+
+    Returns
+    -------
+    context : Context
+        The corresponding CPU pinned memory context.
+=cut
+
+method cpu_pinned(Int $device_id=0)
+{
+    return $self->new(device_type => 'cpu_pinned', device_id => $device_id);
+}
+
 =head2 gpu
 
     Returns a GPU context.
@@ -138,10 +169,62 @@ method gpu(Int $device_id=0)
     $default_ctx : AI::MXNet::Context
 =cut
 
+
+=head2 num_gpus
+
+    Query CUDA for the number of GPUs present.
+
+    Raises
+    ------
+    Will raise an exception on any CUDA error.
+
+    Returns
+    -------
+    count : int
+        The number of GPUs.
+
+=cut
+
+method num_gpus()
+{
+    return scalar(check_call(AI::MXNetCAPI::GetGPUCount()));
+}
+
+=head2 gpu_memory_info
+
+    Query CUDA for the free and total bytes of GPU global memory.
+
+    Parameters
+    ----------
+    $device_id=0 : int, optional
+        The device id of the GPU device.
+
+    Raises
+    ------
+    Will raise an exception on any CUDA error.
+
+    Returns
+    -------
+    ($free, $total) : (int, int)
+        Free and total memory in bytes.
+=cut
+
+method gpu_memory_info($device_id=0)
+{
+    return check_call(AI::MXNetCAPI::GetGPUMemoryInformation64($device_id));
+}
+
 method current_ctx()
 {
     return $AI::MXNet::current_ctx;
 }
+
+method set_current(AI::MXNet::Context $current)
+{
+    $AI::MXNet::current_ctx = $current;
+}
+
+*current_context = \&current_ctx;
 
 method deepcopy()
 {

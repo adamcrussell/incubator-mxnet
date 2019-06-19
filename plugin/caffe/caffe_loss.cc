@@ -18,6 +18,7 @@
  */
 
 /*!
+ * Copyright (c) 2016 by Contributors
  * \file caffe_loss.cc
  * \brief caffe loss
  * \author Haoran Wang
@@ -46,10 +47,10 @@ Operator *CreateOp<cpu>(CaffeLossParam param, int dtype) {
 }
 
 // DO_BIND_DISPATCH comes from static_operator_common.h
-Operator *CaffeLossProp::CreateOperatorEx(Context ctx, std::vector<TShape> *in_shape,
+Operator *CaffeLossProp::CreateOperatorEx(Context ctx, mxnet::ShapeVector *in_shape,
                                      std::vector<int> *in_type) const {
   std::vector<int> out_type, aux_type;
-  std::vector<TShape> out_shape, aux_shape;
+  mxnet::ShapeVector out_shape, aux_shape;
   out_type.resize(this->ListOutputs().size());
   out_shape.resize(this->ListOutputs().size());
   aux_type.resize(this->ListAuxiliaryStates().size());

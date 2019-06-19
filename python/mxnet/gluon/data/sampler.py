@@ -18,8 +18,9 @@
 # coding: utf-8
 # pylint: disable=
 """Dataset sampler."""
+__all__ = ['Sampler', 'SequentialSampler', 'RandomSampler', 'BatchSampler']
 
-import random
+import numpy as np
 
 class Sampler(object):
     """Base class for samplers.
@@ -64,8 +65,8 @@ class RandomSampler(Sampler):
         self._length = length
 
     def __iter__(self):
-        indices = list(range(self._length))
-        random.shuffle(indices)
+        indices = np.arange(self._length)
+        np.random.shuffle(indices)
         return iter(indices)
 
     def __len__(self):

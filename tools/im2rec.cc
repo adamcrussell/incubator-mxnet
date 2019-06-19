@@ -18,6 +18,7 @@
  */
 
 /*!
+ *  Copyright (c) 2015 by Contributors
  * \file im2rec.cc
  * \brief convert images into image recordio format
  *  Image Record Format: zeropad[64bit] imid[64bit] img-binary-content
@@ -38,6 +39,7 @@
 #include <dmlc/logging.h>
 #include <dmlc/recordio.h>
 #include <opencv2/opencv.hpp>
+#include "../src/io/opencv_compatibility.h"
 #include "../src/io/image_recordio.h"
 #include <random>
 /*!
